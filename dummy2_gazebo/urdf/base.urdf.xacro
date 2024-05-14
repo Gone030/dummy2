@@ -1,7 +1,7 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="test1">
 
-    <xacro:property name="base_width" value="0.39"/>
+    <xacro:property name="base_width" value="0.40"/>
     <xacro:property name="base_length" value="0.70"/>
     <xacro:property name="base_height" value="0.20"/>
 
@@ -10,9 +10,8 @@
 
     <xacro:property name="wheel_ygap" value="0.035"/>
 
-    <xacro:property name="wheel_xoff" value="0.095"/>
+    <xacro:property name="wheel_xoff" value="0.305"/>
     <xacro:property name="wheel_zoff" value="0.06"/>
-    <xacro:property name="caster_xoff" value="0.217"/>
 
     <xacro:macro name="box_inertia" params="m w h d">
         <inertial>
@@ -91,38 +90,163 @@
     </xacro:macro>
     <xacro:wheel prefix="drivewhl_l" x_reflect="-1" y_reflect="1"/>
     <xacro:wheel prefix="drivewhl_r" x_reflect="-1" y_reflect="-1"/>
+    <link name="front_left_wheel_steer">
+      <visual>
+        <geometry>
+          <cylinder length="0.01" radius="0.01"/>
+        </geometry>
+        <material name="black">
+          <color rgba="0 0 0 1"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder length="0.01" radius="0.01"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.1"/>
+        <inertia ixx="5.1458e-5" iyy="5.1458e-5" izz="6.125e-5"
+                ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+    <link name="front_left_wheel">
+      <visual>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}" />
+        </geometry>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+      <xacro:wheel_inertia m="0.5" r="${wheel_radius}" h="${wheel_width}"/>
+    </link>
 
-  <link name="front_caster">
-    <visual>
+    <!-- <link name="front_left_wheel_shock">
+        <visual>
+        <origin xyz="0 0 0.1" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="0.05" radius="0.01"/>
+        </geometry>
+        <material name="silver">
+          <color rgba="0.75 0.75 0.75 1"/>
+        </material>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0.1" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="0.05" radius="0.01"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.01"/>
+        <inertia ixx="0.015" iyy="0.0375" izz="0.0375"
+                ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link> -->
+
+    <!-- <joint name="front_left_shock_joint" type="prismatic">
+      <limit lower="0" upper="0.09" effort="100" velocity="100"/>
+      <axis xyz="0 0 1"/>
+      <parent link="base_link"/>
+      <child link="front_left_wheel_shock"/>
+      <origin rpy="0 0 0" xyz="${wheel_xoff} ${(base_width/2+wheel_ygap)} ${-(wheel_zoff)}"/>
+    </joint> -->
+
+    <joint name="front_left_wheel_steer_joint" type="revolute">
+      <limit lower="-1" upper="1" effort="1" velocity="5"/>
+      <axis xyz="0 0 1"/>
+      <parent link="base_link"/>
+      <child link="front_left_wheel_steer"/>
+      <origin rpy="0 0 0" xyz="0 0 0"/>
+    </joint>
+
+    <joint name="front_left_wheel_joint" type="continuous">
+      <axis xyz="0 0 1"/>
+      <parent link="front_left_wheel_steer"/>
+      <child link="front_left_wheel"/>
+      <origin rpy="${-pi/2} 0 0" xyz="${wheel_xoff} ${(base_width/2+wheel_ygap)} ${-1*(wheel_zoff)}"/>
+    </joint>
+
+    <link name="front_right_wheel_steer">
+      <visual>
+        <geometry>
+          <cylinder length="0.01" radius="0.01"/>
+        </geometry>
+        <material name="black">
+          <color rgba="0 0 0 1"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder length="0.01" radius="0.01"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.1"/>
+        <inertia ixx="5.1458e-5" iyy="5.1458e-5" izz="6.125e-5"
+                ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
+
+    <link name="front_right_wheel">
+      <visual>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+      </collision>
+      <xacro:wheel_inertia m="0.5" r="${wheel_radius}" h="${wheel_width}"/>
+    </link>
+
+    <!-- <link name="front_right_wheel_shock">
+      <visual>
+      <origin xyz="0 0 0.1" rpt="0 0 0"/>
       <geometry>
-        <sphere radius="${(wheel_radius+wheel_zoff-(base_height/2))}"/>
+        <cylinder radius="0.01" length="0.05"/>
       </geometry>
-      <material name="Cyan">
-        <color rgba="0 1.0 1.0 1.0"/>
-      </material>
-    </visual>
+      </visual>
+      <collision>
+        <origin xyz="0 0 0.1" rpy="0 0 0"/>
+        <geometry>
+          <cylinder length="0.05" radius="0.01"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.01"/>
+        <inertia ixx="0.015" iyy="0.0375" izz="0.0375"
+                ixy="0" ixz="0" iyz="0"/>
+      </inertial>
+    </link>
 
-    <collision>
-      <origin xyz="0 0 0" rpy="0 0 0"/>
-      <geometry>
-        <sphere radius="${(wheel_radius+wheel_zoff-(base_height/2))}"/>
-      </geometry>
-    </collision>
+    <joint name="front_right_shock_joint" type="prismatic">
+      <limit lower="0.0" upper="0.09" effort="100" velocity="100"/>
+      <axis xyz="0.0 0.0 1.0"/>
+      <parent link="base_link"/>
+      <child link="front_right_wheel_shock"/>
+      <origin rpy="0 0 0" xyz="${wheel_xoff} ${-(base_width/2+wheel_ygap)} ${-(wheel_zoff)}"/>
+    </joint> -->
 
-    <xacro:sphere_inertia m="5.0" r="${(wheel_radius+wheel_zoff-(base_height/2))}"/>
-  </link>
+    <joint name="front_right_wheel_steer_joint" type="revolute">
+      <limit lower="-1" upper="1" effort="1" velocity="5"/>
+      <axis xyz="0.0 0.0 1.0"/>
+      <parent link="base_link"/>
+      <child link="front_right_wheel_steer"/>
+      <origin xyz="0.0 0.0 0.0" rpy="0.0 0.0 0.0"/>
+    </joint>
 
-  <gazebo reference="front_caster">
-    <mu1>0.01</mu1>
-    <mu2>0.01</mu2>
-    <material>Gazebo/White</material>
-  </gazebo>
-
-  <joint name="caster_joint" type="fixed">
-    <parent link="base_link"/>
-    <child link="front_caster"/>
-    <origin xyz="${caster_xoff} 0.0 ${-(base_height/2)}" rpy="0 0 0"/>
-  </joint>
+    <joint name="front_right_wheel_joint" type="continuous">
+      <axis xyz="1.0 0.0 1.0"/>
+      <parent link="front_right_wheel_steer"/>
+      <child link="front_right_wheel"/>
+      <origin rpy="${-pi/2} 0.0 0.0" xyz="${wheel_xoff} ${-1*(base_width/2+wheel_ygap)} ${-1*(wheel_zoff)}"/>
+    </joint>
 
     <link name="imu_link">
     <visual>
@@ -130,13 +254,11 @@
         <box size="0.1 0.1 0.1"/>
       </geometry>
     </visual>
-
     <collision>
       <geometry>
         <box size="0.1 0.1 0.1"/>
       </geometry>
     </collision>
-
     <xacro:box_inertia m="0.1" w="0.1" d="0.1" h="0.1"/>
   </link>
 
@@ -294,47 +416,7 @@
   </gazebo>
 
   <gazebo>
-    <plugin name="two_wheeled_robot_diff_drive" filename="libgazebo_ros_diff_drive.so">
-
-      <update_rate>30</update_rate>
-
-      <!-- wheels -->
-      <left_joint>drivewhl_l_joint</left_joint>
-      <right_joint>drivewhl_r_joint</right_joint>
-
-      <!-- kinematics -->
-      <wheel_separation>0.52</wheel_separation>
-      <wheel_diameter>0.28</wheel_diameter>
-
-      <!-- limits -->
-      <max_wheel_torque>20</max_wheel_torque>
-      <max_wheel_acceleration>1.0</max_wheel_acceleration>
-
-      <!-- Receive velocity commands on this ROS topic -->
-      <command_topic>cmd_vel</command_topic>
-
-      <!-- output -->
-      <!-- When false, publish no wheel odometry data to a ROS topic -->
-      <publish_odom>true</publish_odom>
-
-      <!-- When true, publish coordinate transform from odom to base_footprint -->
-      <!-- I usually use the robot_localization package to publish this transform -->
-      <publish_odom_tf>true</publish_odom_tf>
-
-      <!-- When true, publish coordinate transform from base_link to the wheels -->
-      <!-- The robot_state_publisher package is often used to publish this transform -->
-      <publish_wheel_tf>true</publish_wheel_tf>
-
-      <odometry_topic>odom</odometry_topic>
-      <odometry_frame>odom</odometry_frame>
-      <robot_base_frame>base_link</robot_base_frame>
-
-      <odometry_source>1</odometry_source>
-      <!-- <ros>
-        <remapping>odom:=odom</remapping>
-      </ros> -->
+    <plugin name="ackermann_gazebo_plugin" filename="libackermann_gazebo_plugin.so">
     </plugin>
   </gazebo>
-
-
 </robot>
