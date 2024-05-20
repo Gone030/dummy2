@@ -22,8 +22,8 @@ namespace ackermann_gazebo_plugin{
         ros_node_ = gazebo_ros::Node::Get(sdf);
         RCLCPP_INFO(ros_node_->get_logger(), "loading plugin");
 
-        auto alljoints = model_->GetJoints();
-        for(auto const& j : alljoints){
+        auto all_joints = model_->GetJoints();
+        for(auto const& j : all_joints){
             if(j->GetType() == gazebo::physics::Joint::FIXED_JOINT){
                 continue;
             }
@@ -49,15 +49,35 @@ namespace ackermann_gazebo_plugin{
         fr_str_joint = get_joint("front_right_wheel_steer_joint");
         jc->SetPositionPID(fr_str_joint->GetScopedName(), fr_pid);
 
+        fl_shock_pid = gazebo::common::PID(500, 0, 60);
+        fl_shock_joint = get_joint("front_left_shock_joint");
+        jc->SetPositionPID(fl_shock_joint->GetScopedName(), fl_shock_pid);
+        jc->SetPositionTarget(fl_shock_joint->GetScopedName(), 0.0);
+
+        fr_shock_pid = gazebo::common::PID(500, 0, 60);
+        fr_shock_joint = get_joint("front_right_shock_joint");
+        jc->SetPositionPID(fr_shock_joint->GetScopedName(), fr_shock_pid);
+        jc->SetPositionTarget(fr_shock_joint->GetScopedName(), 0.0);
+
+        bl_shock_pid = gazebo::common::PID(500, 0, 60);
+        bl_shock_joint = get_joint("back_left_shock_joint");
+        jc->SetPositionPID(bl_shock_joint->GetScopedName(), bl_shock_pid);
+        jc->SetPositionTarget(bl_shock_joint->GetScopedName(), 0.0);
+
+        br_shock_pid = gazebo::common::PID(500, 0, 60);
+        br_shock_joint = get_joint("back_right_shock_joint");
+        jc->SetPositionPID(br_shock_joint->GetScopedName(), bl_shock_pid);
+        jc->SetPositionTarget(br_shock_joint->GetScopedName(), 0.0);
+
         fl_wheel_joint = get_joint("front_left_wheel_joint");
         fr_wheel_joint = get_joint("front_right_wheel_joint");
 
         bl_pid = gazebo::common::PID(0.1, 0.01, 0);
-        bl_wheel_joint = get_joint("drivewhl_l_joint");
+        bl_wheel_joint = get_joint("back_left_wheel_joint");
         jc->SetVelocityPID(bl_wheel_joint->GetScopedName(), bl_pid);
 
         br_pid = gazebo::common::PID(0.1, 0.01, 0);
-        br_wheel_joint = get_joint("drivewhl_r_joint");
+        br_wheel_joint = get_joint("back_right_wheel_joint");
         jc->SetVelocityPID(br_wheel_joint->GetScopedName(), br_pid);
 
         // odo_fl_pub = ros_node_->create_publisher<std_msgs::msg::Int32>("/" + model_->GetName() + "/odo_fl", 10);

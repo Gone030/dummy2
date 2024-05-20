@@ -12,7 +12,7 @@ def generate_launch_description():
 
     world = LaunchConfiguration('world')
 
-    declere_world_config = DeclareLaunchArgument(
+    declare_world_config = DeclareLaunchArgument(
         'world',
         default_value=[os.path.join(pkg_dummy2, 'worlds', 'empty.world'), ''],
         description='world file'
@@ -23,7 +23,7 @@ def generate_launch_description():
         launch_arguments={'world': world}.items(),
     )
     ld = LaunchDescription()
-    ld.add_action(declere_world_config)
+    ld.add_action(declare_world_config)
     ld.add_action(gazebo)
 
     return ld

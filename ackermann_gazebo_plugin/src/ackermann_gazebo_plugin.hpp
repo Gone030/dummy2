@@ -36,10 +36,16 @@ namespace ackermann_gazebo_plugin{
             gazebo::physics::JointPtr fl_wheel_joint;
             gazebo::physics::JointPtr fr_wheel_joint;
 
+            gazebo::physics::JointPtr fl_shock_joint;
+            gazebo::physics::JointPtr fr_shock_joint;
+            gazebo::physics::JointPtr bl_shock_joint;
+            gazebo::physics::JointPtr br_shock_joint;
+
             gazebo::physics::JointPtr bl_wheel_joint;
             gazebo::physics::JointPtr br_wheel_joint;
 
             gazebo::common::PID fl_pid, fr_pid, bl_pid, br_pid;
+            gazebo::common::PID fl_shock_pid, fr_shock_pid, bl_shock_pid, br_shock_pid;
 
             rclcpp::Node::SharedPtr ros_node_;
             std::map<std::string, std::pair<gazebo::physics::JointPtr, gazebo::common::PID>> joints_;
