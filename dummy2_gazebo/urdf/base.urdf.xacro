@@ -368,7 +368,7 @@
   <gazebo reference="lidar_link">
     <sensor name="lidar" type="ray">
       <always_on>true</always_on>
-      <visualize>true</visualize>
+      <visualize>false</visualize>
       <update_rate>3</update_rate>
       <ray>
         <scan>
@@ -400,8 +400,8 @@
     </sensor>
   </gazebo>
 
-  <!-- <gazebo>
+  <gazebo>
     <plugin name="ackermann_gazebo_plugin" filename="libackermann_gazebo_plugin.so">
     </plugin>
-  </gazebo> -->
+  </gazebo>
 </robot>

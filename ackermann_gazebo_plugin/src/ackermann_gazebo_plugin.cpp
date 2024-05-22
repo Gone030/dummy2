@@ -16,8 +16,8 @@ namespace ackermann_gazebo_plugin{
         model_ = model;
         world_ = model_->GetWorld();
 
-        if(sdf->HasElement("test_model")){
-            robot_namespace_ = sdf->GetElement("test_model")->Get<std::string>() + "/";
+        if(sdf->HasElement("dummy2")){
+            robot_namespace_ = sdf->GetElement("dummy2")->Get<std::string>() + "/";
         }
         ros_node_ = gazebo_ros::Node::Get(sdf);
         RCLCPP_INFO(ros_node_->get_logger(), "loading plugin");
@@ -36,6 +36,12 @@ namespace ackermann_gazebo_plugin{
             auto const& name = j->GetName();
             joints_[name] = std::make_pair(j, pid);
         }
+
+        for(auto const& j : joints_){
+            RCLCPP_DEBUG(ros_node_-> get_logger(), j.first.c_str());
+        }
+
+        tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*ros_node_);
 
         joint_state_pub_ = ros_node_->create_publisher<sensor_msgs::msg::JointState>("/joint_states", rclcpp::SensorDataQoS());
 
@@ -80,7 +86,6 @@ namespace ackermann_gazebo_plugin{
         br_wheel_joint = get_joint("back_right_wheel_joint");
         jc->SetVelocityPID(br_wheel_joint->GetScopedName(), br_pid);
 
-        // odo_fl_pub = ros_node_->create_publisher<std_msgs::msg::Int32>("/" + model_->GetName() + "/odo_fl", 10);
         cmd_vel_sub = ros_node_->create_subscription<geometry_msgs::msg::Twist>(
             "/cmd_vel", 2, std::bind(&AckermannGazeboPlugin::twist_callback, this, std::placeholders::_1)
         );

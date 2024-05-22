@@ -17,10 +17,10 @@ def generate_launch_description():
         default_value=[os.path.join(pkg_dummy2, 'worlds', 'empty.world'), ''],
         description='world file'
     )
-
     gazebo = IncludeLaunchDescription(
         PythonLaunchDescriptionSource([os.path.join(pkg_gazebo_ros, 'launch', 'gazebo.launch.py')]),
-        launch_arguments={'world': world}.items(),
+        launch_arguments={'world': world,
+                          }.items(),
     )
     ld = LaunchDescription()
     ld.add_action(declare_world_config)

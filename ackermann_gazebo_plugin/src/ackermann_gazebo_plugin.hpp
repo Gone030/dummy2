@@ -78,6 +78,7 @@ namespace ackermann_gazebo_plugin{
                 return joint;
             }
             void twist_callback(geometry_msgs::msg::Twist::SharedPtr msg){
+                RCLCPP_INFO(ros_node_->get_logger(), "get twist velue");
                 if(msg->linear.x == 0){ //정지
                     jc->SetPositionTarget(fl_str_joint->GetScopedName(),
                                             0.0);
