@@ -26,7 +26,7 @@ amcl:
     recovery_alpha_fast: 0.0
     recovery_alpha_slow: 0.0
     resample_interval: 1
-    robot_model_type: "nav2_amcl::DifferentialMotionModel"
+    robot_model_type: "differential"
     save_pose_rate: 0.5
     sigma_hit: 0.2
     tf_broadcast: true
@@ -122,7 +122,7 @@ controller_server:
 
 
     FollowPath:
-      plugin: "nav2_line_following_controller:LineFollowingController"
+      plugin: "nav2_line_following_controller::LineFollowingController"
       max_velocity: 0.5
       max_reverse_velocity: 0.25
       max_acceleration: 1.0
@@ -330,3 +330,10 @@ waypoint_follower:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint"
       enabled: True
       waypoint_pause_duration: 200
+
+slam_toolbox:
+  ros__parameters:
+    minimum_travel_distance: 0.01
+    minimum_travel_heading: 0.01
+    map_update_interval: 1.0
+    loop_search_maximum_distance: 0.5
