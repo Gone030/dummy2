@@ -15,6 +15,7 @@ namespace ackermann_gazebo_plugin{
     void AckermannGazeboPlugin::Load(gazebo::physics::ModelPtr model, sdf::ElementPtr sdf){
         model_ = model;
         world_ = model_->GetWorld();
+        std::cout << "model name : " << model_->GetName() << std::endl;
 
         if(sdf->HasElement("dummy2")){
             robot_namespace_ = sdf->GetElement("dummy2")->Get<std::string>() + "/";

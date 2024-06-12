@@ -51,7 +51,7 @@ bt_navigator:
   ros__parameters:
     use_sim_time: False
     global_frame: map
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     odom_topic: /odom
     bt_loop_duration: 10
     default_server_timeout: 20
@@ -98,6 +98,7 @@ bt_navigator_rclcpp_node:
 controller_server:
   ros__parameters:
     use_sim_time: False
+    odom_topic: dummy2/odom
     controller_frequency: 20.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
@@ -122,58 +123,15 @@ controller_server:
 
 
     FollowPath:
-      plugin: "nav2_line_following_controller::LineFollowingController"
-      max_velocity: 0.5
+      plugin: "nav2_ackermann_controller::AckermannController"
+      max_velocity: 10.0
       max_reverse_velocity: 0.25
       max_acceleration: 1.0
       max_deceleration: 1.0
-      max_lateral_acceleration: 1.0
       lookahead_distance: 1.0
       min_turn_radius: 0.4
       transform_toreance: 0.1
-      steering_k_p: 20.0
-      steering_k_d: 10.0
 
-    # FollowPath:
-    #   plugin: "dwb_core::DWBLocalPlanner"
-    #   debug_trajectory_details: True
-    #   min_vel_x: 0.0
-    #   min_vel_y: 0.0
-    #   max_vel_x: 0.4
-    #   max_vel_y: 0.0
-    #   max_vel_theta: 0.75
-    #   min_speed_xy: 0.0
-    #   max_speed_xy: 0.4
-    #   min_speed_theta: 0.0
-
-    #   acc_lim_x: 2.5
-    #   acc_lim_y: 0.0
-    #   acc_lim_theta: 3.2
-    #   decel_lim_x: -2.5
-    #   decel_lim_y: 0.0
-    #   decel_lim_theta: -3.2
-    #   vx_samples: 20
-    #   vy_samples: 5
-    #   vtheta_samples: 20
-    #   sim_time: 1.7
-    #   linear_granularity: 0.05
-    #   angular_granularity: 0.025
-    #   transform_tolerance: 0.2
-    #   xy_goal_tolerance: 0.25
-    #   trans_stopped_velocity: 0.25
-    #   short_circuit_trajectory_evaluation: True
-    #   stateful: True
-    #   critics: ["RotateToGoal", "Oscillation", "BaseObstacle", "GoalAlign", "PathAlign", "PathDist", "GoalDist"]
-    #   BaseObstacle.scale: 0.02
-    #   PathAlign.scale: 32.0
-    #   PathAlign.forward_point_distance: 0.1
-    #   GoalAlign.scale: 24.0
-    #   GoalAlign.forward_point_distance: 0.1
-    #   PathDist.scale: 32.0
-    #   GoalDist.scale: 24.0
-    #   RotateToGoal.scale: 32.0
-    #   RotateToGoal.slowing_factor: 5.0
-    #   RotateToGoal.lookahead_time: -1.0
 
 
 controller_server_rclcpp_node:
@@ -186,7 +144,7 @@ local_costmap:
       update_frequency: 5.0
       publish_frequency: 5.0
       global_frame: map
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       use_sim_time: False
       rolling_window: true
       width: 6
@@ -230,7 +188,7 @@ global_costmap:
       update_frequency: 0.2
       publish_frequency: 0.2
       global_frame: map
-      robot_base_frame: base_link
+      robot_base_frame: base_footprint
       use_sim_time: False
       footprint: "[[0.35, 0.195], [-0.35, 0.195], [0.35, -0.195], [-0.35, -0.195]]"
       resolution: 0.05
@@ -242,7 +200,7 @@ global_costmap:
         observation_sources: scan
         scan:
           topic: /scan
-          sensor_frame: Lidar_link
+          sensor_frame: lidar_link
           max_obstacle_height: 2.0
           clearing: True
           marking: True
@@ -283,8 +241,7 @@ map_saver:
 
 planner_server:
   ros__parameters:
-    expected_planner_frequency: 20.0
-    use_sim_time: True
+    use_sim_time: False
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_navfn_planner/NavfnPlanner"
@@ -294,7 +251,7 @@ planner_server:
 
 planner_server_rclcpp_node:
   ros__parameters:
-    use_sim_time: True
+    use_sim_time: False
 
 recoveries_server:
   ros__parameters:
@@ -309,7 +266,7 @@ recoveries_server:
     wait:
       plugin: "nav2_recoveries/Wait"
     global_frame: odom
-    robot_base_frame: base_link
+    robot_base_frame: base_footprint
     transform_timeout: 0.1
     use_sim_time: true
     simulate_ahead_time: 2.0

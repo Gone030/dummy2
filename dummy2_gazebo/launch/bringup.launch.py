@@ -1,9 +1,10 @@
 import os
 from ament_index_python import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess
+from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, ExecuteProcess, TimerAction
 from launch.substitutions import LaunchConfiguration
 from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
 
 
 def generate_launch_description():
@@ -30,7 +31,7 @@ def generate_launch_description():
     )
 
     rviz2 = ExecuteProcess(
-        cmd=['rviz2', '--display-config', rviz_config_path],
+        cmd=['rviz2', '--display-config', rviz_config_path, '-r', '__params:=/use_sim_time:=true'],
         output='screen'
     )
 
@@ -53,8 +54,13 @@ def generate_launch_description():
     ld = LaunchDescription()
     ld.add_action(declare_world_config)
     ld.add_action(gazebo)
-    ld.add_action(rviz2)
     ld.add_action(spawn_car)
     ld.add_action(nav_bringup)
-
+    ld.add_action(Node(
+        package='rviz2',
+        executable='rviz2',
+        name='rviz2',
+        arguments=['-d', rviz_config_path],
+        parameters=[{'use_sim_time': True}]
+    ))
     return ld
