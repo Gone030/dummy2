@@ -16,7 +16,7 @@ def generate_launch_description():
     return LaunchDescription([
         DeclareLaunchArgument(
             'world',
-            default_value=[os.path.join(pkg_dummy2, 'worlds', 'dummy2_world.world'), ''],
+            default_value=[os.path.join(pkg_dummy2, 'worlds', 'dummy2_world_edit.world'), ''],
             description='world file'
         ),
         gazebo
