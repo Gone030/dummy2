@@ -14,8 +14,8 @@ amcl:
     global_frame_id: "map"
     lambda_short: 0.1
     laser_likelihood_max_dist: 2.0
-    laser_max_range: -1.0
-    laser_min_range: -1.0
+    laser_max_range: 10.0
+    laser_min_range: 0.5
     laser_model_type: "likelihood_field"
     max_beams: 60
     max_particles: 2000
@@ -26,10 +26,10 @@ amcl:
     recovery_alpha_fast: 0.0
     recovery_alpha_slow: 0.0
     resample_interval: 1
-    robot_model_type: "differential"
+    robot_model_type: "nav2_amcl::DifferentialMotionModel"
     save_pose_rate: 0.5
     sigma_hit: 0.2
-    tf_broadcast: true
+    tf_broadcast: false
     transform_tolerance: 1.0
     update_min_a: 0.2
     update_min_d: 0.25
@@ -52,12 +52,13 @@ bt_navigator:
     use_sim_time: False
     global_frame: map
     robot_base_frame: base_footprint
-    odom_topic: /odom
+    odom_topic: dummy2/odom
     bt_loop_duration: 10
     default_server_timeout: 20
     enable_groot_monitoring: True
     groot_zmq_publisher_port: 1666
     groot_zmq_server_port: 1667
+    default_nav_to_pose_bt_xml: /home/jiwon/jiwon_ws/src/dummy2/dummy2_gazebo/bt/custom_bt.xml
     plugin_lib_names:
     - nav2_compute_path_to_pose_action_bt_node
     - nav2_compute_path_through_poses_action_bt_node
@@ -99,7 +100,7 @@ controller_server:
   ros__parameters:
     use_sim_time: False
     odom_topic: dummy2/odom
-    controller_frequency: 20.0
+    controller_frequency: 10.0
     min_x_velocity_threshold: 0.001
     min_y_velocity_threshold: 0.5
     min_theta_velocity_threshold: 0.001
@@ -118,18 +119,21 @@ controller_server:
     general_goal_checker:
       stateful: True
       plugin: "nav2_controller::SimpleGoalChecker"
-      xy_goal_tolerance: 0.25
-      yaw_goal_tolerance: 0.25
+      xy_goal_tolerance: 0.1
+      yaw_goal_tolerance: 3.14
+      trans_stopped_velocity: 0.03
 
 
     FollowPath:
       plugin: "nav2_ackermann_controller::AckermannController"
-      max_velocity: 10.0
-      max_reverse_velocity: 0.25
-      max_acceleration: 1.0
-      max_deceleration: 1.0
+      # plugin: "nav2_line_following_controller::LineFollowingController"
+      max_cte: 0.5
+      max_velocity: 1.0
+      max_reverse_velocity: 0.50
+      max_acceleration: 1.5
+      max_deceleration: 1.5
       lookahead_distance: 1.0
-      min_turn_radius: 0.4
+      min_turn_radius: 0.3
       transform_toreance: 0.1
 
 
@@ -150,13 +154,9 @@ local_costmap:
       width: 6
       height: 6
       resolution: 0.1
-      footprint: "[[0.35, 0.195], [-0.35, 0.195], [0.35, -0.195], [-0.35, -0.195]]"
+      footprint: "[ [0.30, 0.215], [-0.30, 0.215], [0.30, -0.215], [-0.30, -0.215] ]"
+      footprint_padding: 0.0
       plugins: ["obstacle_layer", "inflation_layer"]
-      inflation_layer:
-        plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 3.0
-        inflation_radius: 0.55
-        enabled: True
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
         enabled: True
@@ -172,13 +172,13 @@ local_costmap:
           raytrace_min_range: 0.2
           obstacle_max_range: 5.0
           obstacle_min_range: 0.2
+      inflation_layer:
+        plugin: "nav2_costmap_2d::InflationLayer"
+        cost_scaling_factor: 3.0
+        inflation_radius: 0.55
+        enabled: True
       always_send_full_costmap: True
-  local_costmap_client:
-    ros__parameters:
-      use_sim_time: False
-  local_costmap_rclcpp_node:
-    ros__parameters:
-      use_sim_time: False
+
 
 global_costmap:
   global_costmap:
@@ -190,7 +190,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_footprint
       use_sim_time: False
-      footprint: "[[0.35, 0.195], [-0.35, 0.195], [0.35, -0.195], [-0.35, -0.195]]"
+      footprint: "[ [0.30, 0.215], [-0.30, 0.215], [0.30, -0.215], [-0.30, -0.215] ]"
       resolution: 0.05
       track_unknown_space: false
       plugins: ["static_layer", "obstacle_layer", "inflation_layer"]
@@ -206,9 +206,9 @@ global_costmap:
           marking: True
           data_type: "LaserScan"
           raytrace_max_range: 10.0
-          raytrace_min_range: 0.0
+          raytrace_min_range: 0.2
           obstacle_max_range: 2.5
-          obstacle_min_range: 0.0
+          obstacle_min_range: 0.2
       static_layer:
         plugin: "nav2_costmap_2d::StaticLayer"
         map_subscribe_transient_local: True
@@ -228,8 +228,7 @@ map_server:
   ros__parameters:
     use_sim_time: False
     yaml_filename: "map.yaml"
-    frame_id: map
-    topic_name: map
+
 
 map_saver:
   ros__parameters:
@@ -244,10 +243,31 @@ planner_server:
     use_sim_time: False
     planner_plugins: ["GridBased"]
     GridBased:
-      plugin: "nav2_navfn_planner/NavfnPlanner"
-      tolerance: 0.5
-      use_astar: false
-      allow_unknown: true
+      plugin: "nav2_smac_planner/SmacPlannerHybrid"
+      downsample_costmap: false           # whether or not to downsample the map
+      downsampling_factor: 1              # multiplier for the resolution of the costmap layer (e.g. 2 on a 5cm costmap would be 10cm)
+      allow_unknown: true                # allow traveling in unknown space
+      max_iterations: 1000000             # maximum total iterations to search for before failing (in case unreachable), set to -1 to disable
+      max_planning_time: 5.0              # max time in s for planner to plan, smooth, and upsample. Will scale maximum smoothing and upsampling times based on remaining time after planning.
+      motion_model_for_search: "REEDS_SHEPP"    # For Hybrid Dubin, Redds-Shepp
+      angle_quantization_bins: 72         # For Hybrid nodes: Number of angle bins for search, must be 1 for 2D node (no angle search)
+      analytic_expansion_ratio: 3.5       # For Hybrid/Lattice nodes: The ratio to attempt analytic expansions during search for final approach.
+      analytic_expansion_max_length: 3.0    # For Hybrid/Lattice nodes: The maximum length of the analytic expansion to be considered valid to prevent unsafe shortcutting (in meters). This should be scaled with minimum turning radius and be no less than 4-5x the minimum radius
+      minimum_turning_radius: 1.0        # For Hybrid/Lattice nodes: minimum turning radius in m of path / vehicle
+      reverse_penalty: 50.0                # For Reeds-Shepp model: penalty to apply if motion is reversing, must be => 1
+      change_penalty: 0.0                 # For Hybrid nodes: penalty to apply if motion is changing directions, must be >= 0
+      non_straight_penalty: 1.5          # For Hybrid nodes: penalty to apply if motion is non-straight, must be => 1
+      cost_penalty: 3.0                   # For Hybrid nodes: penalty to apply to higher cost areas when adding into the obstacle map dynamic programming distance expansion heuristic. This drives the robot more towards the center of passages. A value between 1.3 - 3.5 is reasonable.
+      lookup_table_size: 40.0               # For Hybrid nodes: Size of the dubin/reeds-sheep distance window to cache, in meters.
+      cache_obstacle_heuristic: false      # For Hybrid nodes: Cache the obstacle map dynamic programming distance expansion heuristic between subsiquent replannings of the same goal location. Dramatically speeds up replanning performance (40x) if costmap is largely static.
+      smooth_path: False                   # For Lattice/Hybrid nodes: Whether or not to smooth the path, always true for 2D nodes.
+
+      smoother:
+        max_iterations: 1000
+        w_smooth: 0.1
+        w_data: 0.3
+        tolerance: 1e-10
+        do_refinement: true               # Whether to recursively run the smoother 3 times on the results from prior runs to refine the results further
 
 planner_server_rclcpp_node:
   ros__parameters:
@@ -258,9 +278,7 @@ recoveries_server:
     costmap_topic: local_costmap/costmap_raw
     footprint_topic: local_costmap/published_footprint
     cycle_frequency: 10.0
-    recovery_plugins: ["spin", "backup", "wait"]
-    spin:
-      plugin: "nav2_recoveries/Spin"
+    recovery_plugins: ["backup", "wait"]
     backup:
       plugin: "nav2_recoveries/BackUp"
     wait:
@@ -287,6 +305,20 @@ waypoint_follower:
       plugin: "nav2_waypoint_follower::WaitAtWaypoint"
       enabled: True
       waypoint_pause_duration: 200
+
+velocity_smoother:
+  ros__parameters:
+    smoothing_frequency: 20.0
+    scale_velocities: true
+    feedback: "OPEN_LOOP"
+    max_velocity: [10.0, 0.0, 90.0]
+    min_velocity: [-10.0, 0.0, -90.0]
+    deadband_velocity: [0.0, 0.0, 0.0]
+    velocity_timeout: 1.0
+    max_accel: [2.5, 0.0, 931.0]
+    max_decel: [-2.5, 0.0, -931.0]
+    odom_topic: "dummy2/odom"
+    odom_duration: 0.1
 
 slam_toolbox:
   ros__parameters:

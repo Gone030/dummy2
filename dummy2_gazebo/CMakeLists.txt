@@ -15,7 +15,7 @@ find_package(rclpy REQUIRED)
 # find_package(<dependency> REQUIRED)
 
 install(
-  DIRECTORY launch urdf worlds config
+  DIRECTORY launch urdf worlds config bt
   DESTINATION share/${PROJECT_NAME}
 )
 

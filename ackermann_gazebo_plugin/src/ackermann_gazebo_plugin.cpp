@@ -10,12 +10,14 @@ namespace ackermann_gazebo_plugin{
         : robot_namespace_{""},
           last_sim_time_{0},
           last_update_time_{0},
-          update_period_ms_{5} {}
+          update_period_ms_{8} {}
 
     void AckermannGazeboPlugin::Load(gazebo::physics::ModelPtr model, sdf::ElementPtr sdf){
         model_ = model;
         world_ = model_->GetWorld();
-        std::cout << "model name : " << model_->GetName() << std::endl;
+
+        auto pysicsEngine = world_->Physics();
+        pysicsEngine->SetParam("friction_model", std::string("cone_model")); // 마찰 모델 설정
 
         if(sdf->HasElement("dummy2")){
             robot_namespace_ = sdf->GetElement("dummy2")->Get<std::string>() + "/";
@@ -101,6 +103,7 @@ namespace ackermann_gazebo_plugin{
 
     void AckermannGazeboPlugin::update(){
         auto cur_time = world_->SimTime();
+
         if(last_sim_time_ == 0){
             last_sim_time_ = cur_time;
             last_update_time_ = cur_time;
