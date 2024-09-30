@@ -10,14 +10,38 @@ find_package(ament_cmake REQUIRED)
 find_package(urdf REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(rclpy REQUIRED)
+find_package(nav_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(nav2_costmap_2d REQUIRED)
+find_package(nav2_util REQUIRED)
+find_package(tf2 REQUIRED)
+find_package(tf2_geometry_msgs REQUIRED)
+find_package(nav2_core REQUIRED)
+find_package(nav2_smac_planner REQUIRED)
+
 # uncomment the following section in order to fill in
 # further dependencies manually.
 # find_package(<dependency> REQUIRED)
 
 install(
-  DIRECTORY launch urdf worlds config bt
+  DIRECTORY launch urdf worlds config bt src
   DESTINATION share/${PROJECT_NAME}
 )
+
+add_executable(exploration_node src/exploration_node.cpp)
+ament_target_dependencies(exploration_node rclcpp nav2_costmap_2d geometry_msgs)
+
+add_executable(test_node src/test.cpp)
+ament_target_dependencies(test_node rclcpp nav_msgs geometry_msgs nav2_util nav2_smac_planner nav2_costmap_2d)
+
+add_executable(initial_pose_publisher src/initialpose_node.cpp)
+ament_target_dependencies(initial_pose_publisher rclcpp geometry_msgs tf2 tf2_geometry_msgs)
+
+install(TARGETS
+  exploration_node
+  test_node
+  initial_pose_publisher
+  DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
   find_package(ament_lint_auto REQUIRED)

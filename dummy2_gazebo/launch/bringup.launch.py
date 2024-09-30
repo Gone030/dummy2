@@ -13,7 +13,6 @@ def generate_launch_description():
     pkg_gazebo_ros = get_package_share_directory('gazebo_ros')
     pkg_dummy2 = get_package_share_directory('dummy2_gazebo')
     pkg_nav2 = get_package_share_directory('nav2_bringup')
-    pkg_sim_car = get_package_share_directory('sim_car')
 
     world_config = DeclareLaunchArgument(
         'world',
@@ -35,11 +34,6 @@ def generate_launch_description():
         'config', 'navigation.yaml'
     )
 
-    # nav2_params_path = os.path.join(
-    #     get_package_share_directory('sim_car'),
-    #     'config', 'nav2_params.yaml'
-    # )
-
     bt_path = os.path.join(get_package_share_directory('dummy2_gazebo'),
                             'bt',
                             'custom_bt.xml')
@@ -56,7 +50,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'slam' : "1",
-            'map' : os.path.join(pkg_dummy2, 'worlds/simple_map', 'empty.yaml'),
+            'map' : os.path.join(pkg_dummy2, 'worlds/simple_map', 'my_map2.yaml'),
             'params_file': configured_nav2_params,
         }.items()
     )
@@ -70,9 +64,19 @@ def generate_launch_description():
     spawn_car = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(pkg_dummy2, 'launch', 'description.launch.py')
-            # os.path.join(pkg_sim_car, 'launch', 'spawn_car.launch.py'),
         )
     )
+    initial_pose_node = Node(
+        package= 'dummy2_gazebo',
+        executable= 'initial_pose_publisher',
+        output= 'screen',
+        parameters= [{
+            'initial_x' : 0.0,
+            'initial_y' : 0.0,
+            'initial_yaw': 0.0,
+        }]
+    )
+
     ld = LaunchDescription()
     ld.add_action(world_config)
     ld.add_action(gazebo)
@@ -85,4 +89,5 @@ def generate_launch_description():
             period=0.0,
             actions=[nav_bringup]
             ))
+    ld.add_action(initial_pose_node)
     return ld
