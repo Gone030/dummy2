@@ -33,7 +33,7 @@ class Exploration_map : public rclcpp::Node
             // );
 
             btl_sub = this->create_subscription<nav2_msgs::msg::BehaviorTreeLog>(
-                "/behavior_tree_log", 1, std::bind(&Exploration_map::btl_callback, this, std::placeholders::_1)
+                "/behavior_tree_log", 5, std::bind(&Exploration_map::btl_callback, this, std::placeholders::_1)
             );
 
             goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/goal_pose", 10);
@@ -49,48 +49,71 @@ class Exploration_map : public rclcpp::Node
         // }
 
         void btl_callback(const nav2_msgs::msg::BehaviorTreeLog::SharedPtr msg){
-            if(msg->event_log.empty()) {explore();}
-            else{
-                for(size_t i = 0; i < msg->event_log.size(); i ++){
-                    std::string node_name_ = msg->event_log[i].node_name;
-                    std::string current_status_ = msg->event_log[i].current_status;
-                    std::string previous_status_ = msg->event_log[i].previous_status;
-                    if(node_name_ == "ComputePathToPose" && current_status_ == "FAILURE"){
-                        RCLCPP_WARN(this->get_logger(), "Failed to compute pose.");
-                        explore();
-                        RCLCPP_WARN(this->get_logger(), "End to searching.");
-                        break;
-                    }
-                    else if(node_name_ == "FollowPath" && current_status_ == "IDLE" && previous_status_ == "SUCCESS"){
-                        RCLCPP_INFO(this->get_logger(), "SUCCEED to move.");
-                        clearAround(current_goal);
-                        nextGoalStack_ = std::stack<std::pair<unsigned int, unsigned int>>();
-                        explore(); // 임시
-                        break;
-                    }
-                    else if(node_name_ == "FollowPath" && current_status_ == "IDLE" && previous_status_ == "FAILURE"){
-                        RCLCPP_WARN(this->get_logger(), "Failed to move.");
 
-                        unsigned int current_y = (pose_.pose.pose.position.y - map_->info.origin.position.y) / map_->info.resolution;
-                        unsigned int current_x = (pose_.pose.pose.position.x - map_->info.origin.position.x) / map_->info.resolution;
-
-                        clearAround({current_y, current_x});
-                        nextGoalStack_ = std::stack<std::pair<unsigned int, unsigned int>>();
-                        explore();
-                        RCLCPP_WARN(this->get_logger(), "End to searching.");
-                        break;
-                    }
+            for(size_t i = 0; i < msg->event_log.size(); i ++){
+                std::string node_name_ = msg->event_log[i].node_name;
+                std::string current_status_ = msg->event_log[i].current_status;
+                std::string previous_status_ = msg->event_log[i].previous_status;
+                if(node_name_ == "ComputePathToPose" && current_status_ == "FAILURE"){
+                    RCLCPP_WARN(this->get_logger(), "Failed to compute pose.");
+                    nextGoalStack_.pop();
                 }
-
+                else if(node_name_ == "FollowPath" && current_status_ == "SUCCESS"){
+                    RCLCPP_INFO(this->get_logger(), "SUCCEED to move.");
+                    clearAround(current_goal);
+                    unsigned int idx_ = current_goal.first * map_->info.width + current_goal.second;
+                    RCLCPP_INFO(this->get_logger(), "map data : %d ", map_->data[idx_]);
+                    nextGoalStack_ = std::stack<std::pair<unsigned int, unsigned int>>();
+                    explore();
+                }
+                else if(node_name_ == "FollowPath" && current_status_ == "FAILURE" && previous_status_ == "RUNNING"){
+                    RCLCPP_WARN(this->get_logger(), "Failed to move.");
+                    nextGoalStack_.pop();
+                    explore();
+                }
+                if(node_name_ == "RateController" && current_status_ == "IDLE"){
+                    RCLCPP_INFO(this->get_logger(), "goal set");
+                    goal_set();
+                }
             }
         }
-
+        bool first = false;
         void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg){
             if(msg->data.empty()){
                 RCLCPP_WARN(this->get_logger(), "Empty map");
                 return;
             }
             map_ = msg;
+            explore();
+            // if(!first){
+            //     first = true;
+            //     goal_set();
+            // }
+
+        }
+
+        void goal_set(){ ///temp
+            if(!nextGoalStack_.empty()){
+                while(1){
+                    if(nextGoalStack_.empty()){
+                        RCLCPP_INFO(this->get_logger(), "EMPTY.");
+                        setgoal({0,0}); // 비어있으면 임시로 0,0
+                        break;
+                    }
+                    auto new_goal = nextGoalStack_.top();
+                    if(visited[new_goal]) {
+                        nextGoalStack_.pop();
+                        continue;
+                    }
+                    if(new_goal.first != 0 && new_goal.second != 0){
+                        current_goal = new_goal;
+                        break; // 조건 부합 시 탈출
+                    }
+                    clearAround(current_goal);
+                    nextGoalStack_.pop();
+                }
+                setgoal(current_goal); // Goal pub
+            }
         }
 
         void pose_callback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg){
@@ -98,44 +121,9 @@ class Exploration_map : public rclcpp::Node
             pose_ = *msg;
         }
 
-/*        bool isGoalReached(const geometry_msgs::msg::PoseWithCovarianceStamped &current_pose, const geometry_msgs::msg::PoseStamped &goal_pose){
-            // RCLCPP_INFO(this->get_logger(), "Verifying that the move is complete");
 
-            if(Collision){
-                RCLCPP_INFO(this->get_logger(), "Collision ahead. Need new goal.");
-                return true;
-            }
-            if(goal_pose.pose.position.x == 0 && goal_pose.pose.position.y == 0){
-                RCLCPP_INFO(this->get_logger(), "goal is 0,0");
-                return true;
-            }
-            double dist = distance(current_pose.pose.pose.position.y, current_pose.pose.pose.position.x, goal_pose.pose.position.y, goal_pose.pose.position.x);
-
-
-
-            // RCLCPP_INFO(this->get_logger(), "temp_idx : %d , temp_y : %d , temp_x : %d", temp_idx, grid_y, grid_x);
-
-            if(last_dist == dist){
-                RCLCPP_INFO(this->get_logger(), "Robot is stuck, resetting goal.");
-                return true;
-            }
-            last_dist = dist;
-            double threshold = 0.5;
-            RCLCPP_INFO(this->get_logger(), "Distance : %f, Threshold : %f", dist, threshold);
-            if(dist < threshold){
-                RCLCPP_INFO(this->get_logger(), "HAS GOAL RECHED");
-                int radius = 100;
-                for(int i = -radius; i <= radius; i++){
-                    for(int j = -radius; j <= radius; j++){
-                        visited[{(current_goal.first + i), (current_goal.second + j)}] = true;
-                    }
-                }
-                nextGoalStack_ = std::stack<std::pair<unsigned int, unsigned int>>();
-            }
-            return (dist < threshold);
-        } */
         void clearAround(std::pair<unsigned int , unsigned int> current_goal){
-            int radius = 100;
+            int radius = 10;
             for(int i = -radius; i <= radius; i++){
                 for(int j = -radius; j <= radius; j++){
                     visited[{(current_goal.first + i), (current_goal.second + j)}] = true;
@@ -144,9 +132,11 @@ class Exploration_map : public rclcpp::Node
         }
 
         bool isoutofrange(unsigned int pixel_y, unsigned int pixel_x){
-            if(pixel_y >= map_->info.height - 50 || pixel_x >= map_->info.width - 50 || pixel_x <= 50 || pixel_y <= 50){
+            double coord_x = pixeltocoord(pixel_x);
+            double coord_y = pixeltocoord(pixel_y);
+            if(coord_y >= std::fabs(map_->info.origin.position.y) - 3 || coord_x >= std::fabs(map_->info.origin.position.x) - 3
+                || coord_y <= map_->info.origin.position.y + 3 || coord_x <= map_->info.origin.position.x + 3){
                 // RCLCPP_WARN(this->get_logger(), "OUT OF RANGE , y : %d , x : %d, height : %d, width : %d", pixel_y, pixel_x, map_->info.height, map_->info.width);
-                visited[current_goal] = true;
                 return false;
             }
 
@@ -155,15 +145,10 @@ class Exploration_map : public rclcpp::Node
         }
 
         std::vector<std::pair<unsigned int, unsigned int>> search(){
-
+            //현재 지도의 데이터에서 -1 인 idx의 픽셀좌표를 저장
             RCLCPP_INFO(this->get_logger(), "Searching");
             auto &map = *map_;
             // std::pair<unsigned int, unsigned int> new_goal = {0, 0}; // (y, x)
-
-            // RCLCPP_INFO(this->get_logger(), "set current coord");
-            //현재 좌표를 픽셀위치로 변환.
-            // unsigned int current_y = (pose_.pose.pose.position.y - map.info.origin.position.y) / map.info.resolution;
-            // unsigned int current_x = (pose_.pose.pose.position.x - map.info.origin.position.x) / map.info.resolution;
 
             unsigned int width = map.info.width;
             unsigned int height = map.info.height;
@@ -174,17 +159,17 @@ class Exploration_map : public rclcpp::Node
 
             // double last_dist = 0;
 
-            for(unsigned int y = 0; y < height; y++){
-                for(unsigned int x = 0; x < width; x++){
+            for(unsigned int y = 15; y < height - 15; y++){
+                for(unsigned int x = 15; x < width - 15; x++){
                     unsigned int idx = pixelcoordtoidx(y, x, width);
                     if(map_->data[idx] == -1 && !visited[{y, x}]){
-                        // double dist = distance(current_y, current_x, y, x);
                         if(isoutofrange(y,x)){
                             candidates.push_back({y, x});
                         }
                     }
                 }
             }
+            RCLCPP_INFO(this->get_logger(),"Vector size : %ld", candidates.size());
             return candidates;
         }
 
@@ -194,18 +179,19 @@ class Exploration_map : public rclcpp::Node
             goal_msg.header.frame_id = "map";
 
             current_goal = goal;
-            visited[current_goal] = true;
+            // visited[current_goal] = true;
 
             goal_msg.pose.position.y = pixeltocoord(goal.first);
             goal_msg.pose.position.x = pixeltocoord(goal.second);
+            unsigned int idx_ = goal.first * map_->info.width + goal.second;
 
             RCLCPP_INFO(this->get_logger(), "Goal : (%f, %f)", goal_msg.pose.position.x, goal_msg.pose.position.y);
+            RCLCPP_INFO(this->get_logger(), "Checking pixel at (%d, %d): %d", goal.first, goal.second, map_->data[idx_]);
 
             goal_pub_->publish(goal_msg);
         }
 
-        void explore(){
-            RCLCPP_INFO(this->get_logger(), "Explore");
+        bool explore(){
 
             if(nextGoalStack_.empty()) {
                 RCLCPP_INFO(this->get_logger(),"Empty stack");
@@ -213,17 +199,22 @@ class Exploration_map : public rclcpp::Node
                 for (const auto& goal : new_goals){
                     nextGoalStack_.push(goal);
                 }
+                return true;
             }
-            if(!nextGoalStack_.empty()){
-            // 새로운 목표를 검색하여 스택에 추가
-                RCLCPP_INFO(this->get_logger(),"Add stack");
-                auto newGoal = nextGoalStack_.top();
-                current_goal = newGoal;
-                if (newGoal.first != 0 && newGoal.second != 0){
-                    nextGoalStack_.pop();
-                    setgoal(newGoal);
-                }
+            else{
+                return false;
             }
+            // if(!nextGoalStack_.empty()){
+            // // 새로운 목표를 검색하여 스택에 추가
+            //     RCLCPP_INFO(this->get_logger(),"Use stack top");
+            //     auto newGoal = nextGoalStack_.top();
+            //     current_goal = newGoal;
+            //     if (newGoal.first != 0 && newGoal.second != 0 && !visited[newGoal]){
+            //         RCLCPP_INFO(this->get_logger(),"INSIDE");
+            //         nextGoalStack_.pop();
+            //         setgoal(newGoal);
+            //     }
+            // }
         }
 
         ///x2, y2 > x1, y1

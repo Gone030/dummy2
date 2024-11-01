@@ -18,6 +18,9 @@ find_package(tf2 REQUIRED)
 find_package(tf2_geometry_msgs REQUIRED)
 find_package(nav2_core REQUIRED)
 find_package(nav2_smac_planner REQUIRED)
+find_package(rclcpp_action REQUIRED)
+find_package(nav2_msgs REQUIRED)
+find_package(visualization_msgs REQUIRED)
 
 # uncomment the following section in order to fill in
 # further dependencies manually.
@@ -32,7 +35,10 @@ add_executable(exploration_node src/exploration_node.cpp)
 ament_target_dependencies(exploration_node rclcpp nav2_costmap_2d geometry_msgs)
 
 add_executable(test_node src/test.cpp)
-ament_target_dependencies(test_node rclcpp nav_msgs geometry_msgs nav2_util nav2_smac_planner nav2_costmap_2d)
+ament_target_dependencies(test_node rclcpp nav_msgs nav2_msgs geometry_msgs visualization_msgs rclcpp_action)
+
+add_executable(test2_node src/test2.cpp)
+ament_target_dependencies(test2_node rclcpp nav_msgs nav2_msgs geometry_msgs visualization_msgs)
 
 add_executable(initial_pose_publisher src/initialpose_node.cpp)
 ament_target_dependencies(initial_pose_publisher rclcpp geometry_msgs tf2 tf2_geometry_msgs)
@@ -41,6 +47,7 @@ install(TARGETS
   exploration_node
   test_node
   initial_pose_publisher
+  test2_node
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)

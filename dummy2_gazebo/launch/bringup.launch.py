@@ -50,7 +50,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'slam' : "1",
-            'map' : os.path.join(pkg_dummy2, 'worlds/simple_map', 'my_map2.yaml'),
+            'map' : os.path.join(pkg_dummy2, 'worlds/simple_map', 'empty.yaml'),
             'params_file': configured_nav2_params,
         }.items()
     )
