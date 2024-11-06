@@ -323,6 +323,22 @@ velocity_smoother:
 
 slam_toolbox:
   ros__parameters:
+    solver_plugin: solver_plugins::CeresSolver
+    ceres_linear_solver: SPARSE_NORMAL_CHOLESKY
+    ceres_preconditioner: SCHUR_JACOBI
+    ceres_trust_strategy: LEVENBERG_MARQUARDT
+    ceres_dogleg_type: TRADITIONAL_DOGLEG
+    ceres_loss_function: None
+
+    odom_frame: odom
+    map_frame: map
+    base_frame: base_footprint
+    scan_topic: /scan
+    mode: mapping
+
+    resolution: 0.05
+    max_laser_range: 10.0
+
     minimum_travel_distance: 0.01
     minimum_travel_heading: 0.01
     map_update_interval: 1.0
