@@ -37,6 +37,10 @@ class Exploration_map : public rclcpp::Node
                 "/behavior_tree_log", 5, std::bind(&Exploration_map::btl_callback, this, std::placeholders::_1)
             );
 
+            laser_sub = this->create_subscription<sensor_msgs::msg::LaserScan>(
+                "/scan", 10, std::bind(&Exploration_map::scan_callback, this, std::placeholders::_1)
+            );
+
             goal_pub_ = this->create_publisher<geometry_msgs::msg::PoseStamped>("/goal_pose", 10);
 
             cmd_pub_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
@@ -75,14 +79,54 @@ class Exploration_map : public rclcpp::Node
                         // performReverse();
                         // rclcpp::sleep_for(std::chrono::milliseconds(1000));
                         fail_count = 0;
-                    } // 새로운 문제. 이동 완료했음에도 이미 전송된 좌표들이 많아서 그 자리서 왔다갔다함ㅋㅋ
+                    } // 새로운 문제. 이동 완료했음에도 이미 전송된 좌표들이 많아서 그 자리서 왔다갔다함
                       // 맵 확장될 때 마다 visited map 초기화로 해결
 
                     need_set_goal_sign = true;
                 }
             }
         }
-        bool first_goal_rdy = false;
+        void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg){
+            if(!need_scan_data_sign){ return; }
+            laser_msg = msg;
+            if(isObstacleinPath(last_pose_, current_goal)){
+                visited[current_goal] = true;
+                publishVisitedPoints();
+                setGoal(last_pose_);
+            }else{
+                RCLCPP_INFO(this->get_logger(), "CAN MOVE");
+                need_scan_data_sign = false;
+                need_set_goal_sign = false;
+                pubGoal(current_goal);
+            }
+
+        }
+
+        bool isObstacleinPath(const geometry_msgs::msg::PoseStamped& current_pose, const P& goal_pixel){
+            double goal_y = origin_y + goal_pixel.first * resolution;
+            double goal_x = origin_x + goal_pixel.second * resolution;
+
+            double dy = goal_y - current_pose.pose.position.y;
+            double dx = goal_x - current_pose.pose.position.x;
+
+            double angle_to_goal = std::atan2(dy, dx);
+            int ranges_size = laser_msg->ranges.size();
+
+            float scan_offset = 0.3;
+
+            int angle_idx = (angle_to_goal - laser_msg->angle_min) / laser_msg->angle_increment;
+            if(angle_idx < 0 || angle_idx >= ranges_size){
+                return true;
+            }
+            double range_to_goal = std::sqrt(dx * dx + dy * dy);
+            if(laser_msg->ranges[angle_idx] - scan_offset < range_to_goal){
+                return true;
+            }
+            // RCLCPP_INFO(this->get_logger()," range = %f, goal = %f",laser_msg->ranges[angle_idx], range_to_goal );
+            // RCLCPP_INFO(this->get_logger(), "angle : %f", angle_to_goal);
+            return false;
+        }
+
         void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg){
             if(msg->data.empty()){
                 RCLCPP_WARN(this->get_logger(), "Empty map");
@@ -111,18 +155,18 @@ class Exploration_map : public rclcpp::Node
             publishVisitedPoints();
 
         }
-        bool first_goal_set = false;
+
         void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg){
             pose_ = *msg;
+            last_pose_ = pose_;
             if(!first_goal_set && first_goal_rdy){
                 first_goal_set = true;
                 need_set_goal_sign = true;
             }
-            if(need_set_goal_sign){
+            if(need_set_goal_sign && !need_scan_data_sign){
                 setGoal(pose_);
                 need_set_goal_sign = false;
             }
-            last_pose_ = pose_;
         }
 
         void publishVisitedPoints() {
@@ -184,7 +228,8 @@ class Exploration_map : public rclcpp::Node
                     unsigned int idx = pixelcoordtoidx(y, x, width);
                     if(map.data[idx] == -1){//&& visited.find({y, x}) == visited.end()){
                         visited.insert({{y, x}, false}); // 맵이 업데이트될 때 좌표는 어떻게 변하지?
-                                                        // 맵 확장될 때 마다 visited map 초기화로 해결
+                                                        // 장애물 안쪽은 미탐색구역으로 남아있어서 초기화하면 다시 판별해야함
+                                                        //수정필요
 
                     }else{
                         visited[{y, x}] = true;
@@ -225,7 +270,8 @@ class Exploration_map : public rclcpp::Node
                         RCLCPP_INFO(this->get_logger(),"Already gone");
                         continue;
                     }
-                    RCLCPP_INFO(this->get_logger(),"visited[itr] = %d, map_->data[idx] = %d", itr.second, map_->data[temp_idx]);
+                    // RCLCPP_INFO(this->get_logger(),"visited[itr] = %d, map_->data[idx] = %d", itr.second, map_->data[temp_idx]);
+                    // RCLCPP_INFO(this->get_logger(), "current coord = ( %d, %d )", itr.first.first, itr.first.second);
                     double dist = distance(itr.first, current_pixel_coord);
                     if(dist < min_dist){
                         min_dist = dist;
@@ -238,7 +284,9 @@ class Exploration_map : public rclcpp::Node
                 pubGoal({0, 0});
             }else{
                 RCLCPP_INFO(this->get_logger(),"set near goal (%d, %d)", near_goal.first, near_goal.second);
-                pubGoal(near_goal);
+                current_goal = near_goal;
+                need_scan_data_sign = true;
+                // pubGoal(near_goal);
             }
         }
 
@@ -254,7 +302,10 @@ class Exploration_map : public rclcpp::Node
 
 
         int fail_count = 0;
-        bool need_set_goal_sign = false;
+        bool first_goal_rdy = false; // 처음 Map 을 수신 후 활성
+        bool first_goal_set = false; // Map 을 처음 수신 후 pose를 처음 수신하면 활성
+        bool need_set_goal_sign = false; // 활성 될 때 마다 setGoal 실행
+        bool need_scan_data_sign = false; // 활성되면 scan data를 활용
         P current_goal;
         std::map<P, bool> visited;
 
@@ -272,10 +323,11 @@ class Exploration_map : public rclcpp::Node
         geometry_msgs::msg::PoseStamped pose_;
         nav_msgs::msg::OccupancyGrid::SharedPtr map_;
         geometry_msgs::msg::PoseStamped goal_msg;
+        sensor_msgs::msg::LaserScan::SharedPtr laser_msg;
 
 
         rclcpp::Subscription<nav2_msgs::msg::BehaviorTreeLog>::SharedPtr btl_sub;
-
+        rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr laser_sub;
         rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
         rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
         rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
