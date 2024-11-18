@@ -29,8 +29,8 @@ class Exploration_map : public rclcpp::Node
                 "/map", 10, std::bind(&Exploration_map::map_callback, this, std::placeholders::_1)
             );
 
-            pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseWithCovarianceStamped>(
-                "/pose", 10, std::bind(&Exploration_map::pose_callback, this, std::placeholders::_1)
+            pose_sub_ = this->create_subscription<geometry_msgs::msg::PoseStamped>(
+                "/dummy2/pose", 10, std::bind(&Exploration_map::pose_callback, this, std::placeholders::_1)
             );
 
             btl_sub = this->create_subscription<nav2_msgs::msg::BehaviorTreeLog>(
@@ -57,7 +57,9 @@ class Exploration_map : public rclcpp::Node
                 std::string previous_status_ = msg->event_log[i].previous_status;
                 if(node_name_ == "ComputePathToPose" && current_status_ == "FAILURE"){
                     RCLCPP_WARN(this->get_logger(), "Failed to compute pose.");
-                    fail_count++;
+                    need_set_goal_sign = true;
+                    // 박스 장애물 안 -1 Array 는 어떻게 처리해야 빨리 확인할까?
+                    break;
                 }
                 else if(node_name_ == "FollowPath" && current_status_ == "SUCCESS"){
                     RCLCPP_INFO(this->get_logger(), "SUCCEED to move.");
@@ -70,9 +72,12 @@ class Exploration_map : public rclcpp::Node
                 if(node_name_ == "RateController" && current_status_ == "IDLE"){
                     RCLCPP_INFO(this->get_logger(), "READY 2 MOVE");
                     if(fail_count == 5){
-                        performReverse();
+                        // performReverse();
+                        // rclcpp::sleep_for(std::chrono::milliseconds(1000));
                         fail_count = 0;
-                    }
+                    } // 새로운 문제. 이동 완료했음에도 이미 전송된 좌표들이 많아서 그 자리서 왔다갔다함ㅋㅋ
+                      // 맵 확장될 때 마다 visited map 초기화로 해결
+
                     need_set_goal_sign = true;
                 }
             }
@@ -93,6 +98,7 @@ class Exploration_map : public rclcpp::Node
                 width = map_->info.width;
                 height = map_->info.height;
                 resolution = map_->info.resolution;
+                visited.clear();
                 RCLCPP_INFO(this->get_logger(),"W : %d, H : %d, origin x : %f, origin y : %f", width, height, origin_x, origin_y);
                 RCLCPP_INFO(this->get_logger(),"Map size : %ld", visited.size());
                 RCLCPP_INFO(this->get_logger(),"Map begin : %d, %d ", visited.begin()->first.first, visited.begin()->first.second);
@@ -101,20 +107,22 @@ class Exploration_map : public rclcpp::Node
             }
 
             search();
+
             publishVisitedPoints();
 
         }
         bool first_goal_set = false;
-        void pose_callback(const geometry_msgs::msg::PoseWithCovarianceStamped::SharedPtr msg){
+        void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg){
             pose_ = *msg;
             if(!first_goal_set && first_goal_rdy){
                 first_goal_set = true;
                 need_set_goal_sign = true;
             }
             if(need_set_goal_sign){
-                setGoal();
+                setGoal(pose_);
                 need_set_goal_sign = false;
             }
+            last_pose_ = pose_;
         }
 
         void publishVisitedPoints() {
@@ -170,12 +178,14 @@ class Exploration_map : public rclcpp::Node
             //현재 지도의 데이터가 -1 인 idx의 픽셀좌표를 visited 맵에 저장
             //현재 지도의 데이터에서 -1 인 idx의 픽셀좌표를 저장
             auto &map = *map_;
-
+            RCLCPP_INFO(this->get_logger(),"search");
             for(unsigned int y = 10; y < height - 10; y++){
                 for(unsigned int x = 10; x < width - 10; x++){
                     unsigned int idx = pixelcoordtoidx(y, x, width);
                     if(map.data[idx] == -1){//&& visited.find({y, x}) == visited.end()){
-                        visited.insert({{y, x}, false});
+                        visited.insert({{y, x}, false}); // 맵이 업데이트될 때 좌표는 어떻게 변하지?
+                                                        // 맵 확장될 때 마다 visited map 초기화로 해결
+
                     }else{
                         visited[{y, x}] = true;
                     }
@@ -191,18 +201,19 @@ class Exploration_map : public rclcpp::Node
 
             visited[goal] = true;
 
-            goal_msg.pose.position.y = origin_x + goal.first * resolution;
+            goal_msg.pose.position.y = origin_y + goal.first * resolution;
             goal_msg.pose.position.x = origin_x + goal.second * resolution;
 
-            RCLCPP_INFO(this->get_logger(), "Goal : (%f, %f)", goal_msg.pose.position.x, goal_msg.pose.position.y);
+            RCLCPP_INFO(this->get_logger(), "Goal : (x : %f, y : %f)", goal_msg.pose.position.x, goal_msg.pose.position.y);
 
             goal_pub_->publish(goal_msg);
+            // rclcpp::sleep_for(std::chrono::milliseconds(100));
         }
 
-        void setGoal(){
+        void setGoal(const geometry_msgs::msg::PoseStamped &pose_){
             P near_goal = {0, 0};
-            unsigned int pixel_y = (pose_.pose.pose.position.y - origin_y) / resolution;
-            unsigned int pixel_x = (pose_.pose.pose.position.x - origin_x) / resolution;
+            unsigned int pixel_y = (pose_.pose.position.y - origin_y) / resolution;
+            unsigned int pixel_x = (pose_.pose.position.x - origin_x) / resolution;
             P current_pixel_coord = {pixel_y, pixel_x};
 
             double min_dist = std::numeric_limits<double>::max();
@@ -214,6 +225,7 @@ class Exploration_map : public rclcpp::Node
                         RCLCPP_INFO(this->get_logger(),"Already gone");
                         continue;
                     }
+                    RCLCPP_INFO(this->get_logger(),"visited[itr] = %d, map_->data[idx] = %d", itr.second, map_->data[temp_idx]);
                     double dist = distance(itr.first, current_pixel_coord);
                     if(dist < min_dist){
                         min_dist = dist;
@@ -256,15 +268,15 @@ class Exploration_map : public rclcpp::Node
         uint32_t last_height_ = 0;
 
 
-        geometry_msgs::msg::PoseWithCovarianceStamped last_pose_;
-        geometry_msgs::msg::PoseWithCovarianceStamped pose_;
+        geometry_msgs::msg::PoseStamped last_pose_;
+        geometry_msgs::msg::PoseStamped pose_;
         nav_msgs::msg::OccupancyGrid::SharedPtr map_;
         geometry_msgs::msg::PoseStamped goal_msg;
 
 
         rclcpp::Subscription<nav2_msgs::msg::BehaviorTreeLog>::SharedPtr btl_sub;
 
-        rclcpp::Subscription<geometry_msgs::msg::PoseWithCovarianceStamped>::SharedPtr pose_sub_;
+        rclcpp::Subscription<geometry_msgs::msg::PoseStamped>::SharedPtr pose_sub_;
         rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
         rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
         rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
