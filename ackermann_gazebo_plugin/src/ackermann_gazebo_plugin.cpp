@@ -46,7 +46,7 @@ namespace ackermann_gazebo_plugin{
 
         tf_broadcaster_ = std::make_unique<tf2_ros::TransformBroadcaster>(*ros_node_);
 
-        joint_state_pub_ = ros_node_->create_publisher<sensor_msgs::msg::JointState>("/joint_states", rclcpp::SensorDataQoS());
+        joint_state_pub_ = ros_node_->create_publisher<sensor_msgs::msg::JointState>("/joint_states", 10);
 
         jc = model_->GetJointController();
 
@@ -93,8 +93,8 @@ namespace ackermann_gazebo_plugin{
             "/cmd_vel", 2, std::bind(&AckermannGazeboPlugin::twist_callback, this, std::placeholders::_1)
         );
 
-        odom_pub = ros_node_->create_publisher<nav_msgs::msg::Odometry>("/" + model_->GetName() + "/odom", rclcpp::SensorDataQoS());
-        pose_pub = ros_node_->create_publisher<geometry_msgs::msg::PoseStamped>("/" + model_->GetName() + "/odom", rclcpp::SensorDataQoS());
+        odom_pub = ros_node_->create_publisher<nav_msgs::msg::Odometry>("/" + model_->GetName() + "/odom", 10);
+        pose_pub = ros_node_->create_publisher<geometry_msgs::msg::PoseStamped>("/" + model_->GetName() + "/pose", 10);
 
         world_connection_callback_ = gazebo::event::Events::ConnectWorldUpdateBegin(
             std::bind(&AckermannGazeboPlugin::update, this)
