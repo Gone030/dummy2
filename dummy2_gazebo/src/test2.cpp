@@ -76,9 +76,17 @@ class Exploration_map : public rclcpp::Node
                 std::string previous_status_ = msg->event_log[i].previous_status;
                 if(node_name_ == "ComputePathToPose" && current_status_ == "FAILURE"){
                     RCLCPP_WARN(this->get_logger(), "Failed to compute pose.");
-                    scan_init = true;
+                    fail_count++;
+                    if(fail_count != 10){
+                        visited[current_goal] = true;
+
+                    }else{
+                        FailFloodfill(current_goal.first, current_goal.second);
+                        fail_count = 0;
+
+                    }
                     // 박스 장애물 안 -1 Array 는 어떻게 처리해야 빨리 확인할까? => floodfill
-                    break;
+
                 }
                 else if(node_name_ == "FollowPath" && current_status_ == "SUCCESS"){
                     RCLCPP_INFO(this->get_logger(), "SUCCEED to move.");
@@ -89,12 +97,10 @@ class Exploration_map : public rclcpp::Node
                 }
                 if(node_name_ == "RateController" && current_status_ == "IDLE"){
                     RCLCPP_INFO(this->get_logger(), "READY 2 MOVE");
-                    if(fail_count == 5){
-                        // performReverse();
-                        // rclcpp::sleep_for(std::chrono::milliseconds(1000));
-                        fail_count = 0;
-                    } // 새로운 문제. 이동 완료했음에도 이미 전송된 좌표들이 많아서 그 자리서 왔다갔다함
-                      // 맵 확장될 때 마다 visited map 초기화로 해결
+
+                     // 새로운 문제. 이동 완료했음에도 이미 전송된 좌표들이 많아서 그 자리서 왔다갔다함
+                      // 맵 확장될 때 마다 visited map 초기화로 해결 <- 기존에 탐색한 장애물도 초기화돼서 다시 탐색해야하는 비효율적인 동작 발생
+                      // transform 함수 새로 만들어서 해결
 
                     jobdone = true;
                 }
@@ -105,35 +111,57 @@ class Exploration_map : public rclcpp::Node
                 laser_msg = msg;
                 excludeObstacle(laser_msg, last_pose_, map_);//visited, map_);
                 scan_init = false;
-                jobdone = true;
             }
             else{ return; }
         }
 
-        bool isObstacleinPath(const geometry_msgs::msg::PoseStamped& current_pose, const P& goal_pixel){
-            double goal_y = origin_y + goal_pixel.first * resolution;
-            double goal_x = origin_x + goal_pixel.second * resolution;
-
-            double dy = goal_y - current_pose.pose.position.y;
-            double dx = goal_x - current_pose.pose.position.x;
-
-            double angle_to_goal = std::atan2(dy, dx);
-            int ranges_size = laser_msg->ranges.size();
-
-            float scan_offset = 0.3;
-
-            int angle_idx = (angle_to_goal - laser_msg->angle_min) / laser_msg->angle_increment;
-            if(angle_idx < 0 || angle_idx >= ranges_size){
-                return true;
+        void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg){
+            if(msg->data.empty()){
+                RCLCPP_WARN(this->get_logger(), "Empty map");
+                return;
             }
-            double range_to_goal = std::sqrt(dx * dx + dy * dy);
-            if(laser_msg->ranges[angle_idx] - scan_offset < range_to_goal){
-                visited[goal_pixel] = true;
-                return true;
+            // RCLCPP_INFO(this->get_logger(),"Map sub");
+            map_ = msg;
+            i_sub_map = true;
+
+            origin_x = map_->info.origin.position.x;
+            origin_y = map_->info.origin.position.y;
+
+            if(last_origin_x != origin_x || last_origin_y != origin_y){
+                width = map_->info.width;
+                height = map_->info.height;
+                resolution = map_->info.resolution;
+                visited = transformVisited(origin_x, origin_y, last_origin_x, last_origin_y);
+                RCLCPP_INFO(this->get_logger(),"W : %d, H : %d, origin x : %f, origin y : %f", width, height, origin_x, origin_y);
+                RCLCPP_INFO(this->get_logger(),"Map size : %ld", visited.size());
+                RCLCPP_INFO(this->get_logger(),"Map begin : %d, %d ", visited.begin()->first.first, visited.begin()->first.second);
+                last_origin_x = origin_x;
+                last_origin_y = origin_y;
             }
-            // RCLCPP_INFO(this->get_logger()," range = %f, goal = %f",laser_msg->ranges[angle_idx], range_to_goal );
-            // RCLCPP_INFO(this->get_logger(), "angle : %f", angle_to_goal);
-            return false;
+
+            search();
+
+            publishVisitedPoints();
+
+        }
+
+        void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg){
+            last_pose_ = *msg;
+            i_sub_pose = true;
+            if(!first_move && !first_scan){
+                RCLCPP_INFO(this->get_logger(),"Pose first sub");
+                first_move = true;
+            }
+        }
+
+        void FailFloodfill(unsigned int sp_y, unsigned int sp_x){ // 모든 미탐색구역 지우는 현상 해결
+            if(sp_x >= width || sp_y >= height) return;
+            if(visited[{sp_y, sp_x}]) return;
+            visited[{sp_y, sp_x}] = true;
+            FailFloodfill(sp_y, sp_x + 1);
+            FailFloodfill(sp_y, sp_x - 1);
+            FailFloodfill(sp_y + 1, sp_x);
+            FailFloodfill(sp_y - 1, sp_x);
         }
 
         std::vector<std::vector<P>> GetObstacleShapes(const sensor_msgs::msg::LaserScan::SharedPtr& laser_scan,
@@ -193,8 +221,8 @@ class Exploration_map : public rclcpp::Node
             return obstacle;
         }
 
-        void FloodFill(const std::vector<std::vector<P>>& obstacles,// std::map<P, bool>& visited,
-                       const nav_msgs::msg::OccupancyGrid::SharedPtr& map){ // 장애물 크기로 추정되는 공간만 지우도록 수정
+        void ObstacleFloodFill(const std::vector<std::vector<P>>& obstacles,
+                       const nav_msgs::msg::OccupancyGrid::SharedPtr& map){
             RCLCPP_INFO(this->get_logger(),"flood fill");
             int temp_size = obstacles.size();
             RCLCPP_INFO(this->get_logger(),"obstacles size : %d ",temp_size);
@@ -215,31 +243,31 @@ class Exploration_map : public rclcpp::Node
                 unsigned int seed_x = (min_x + max_x) / 2;
                 unsigned int seed_y = (min_y + max_y) / 2;
                 if(visited[{seed_y, seed_x}]){
-                    RCLCPP_INFO(this->get_logger(),"already visited seed coord");
-                    RCLCPP_INFO(this->get_logger(), "seed_x : %d, seed_y : %d", seed_x, seed_y);
+                    // RCLCPP_INFO(this->get_logger(),"already visited seed coord");
+                    // RCLCPP_INFO(this->get_logger(), "seed_x : %d, seed_y : %d", seed_x, seed_y);
                     continue;
                 }
                 q.push({seed_y, seed_x});
                 unsigned int temp_offset = 5;
                 while(!q.empty()){
-                    int temp = q.size();
-                    RCLCPP_INFO(this->get_logger(), "q.size : %d", temp);
+                    // int temp = q.size();
+                    // RCLCPP_INFO(this->get_logger(), "q.size : %d", temp);
                     auto [y, x] = q.front();
                     q.pop();
                     if(x < min_x - temp_offset || x > max_x + temp_offset || y < min_y - temp_offset || y > max_y + temp_offset){
-                        RCLCPP_INFO(this->get_logger(),"out of range");
+                        // RCLCPP_INFO(this->get_logger(),"out of range");
                         continue;
                     }
                     if(visited[{y, x}]){
-                        RCLCPP_INFO(this->get_logger(),"already visited");
+                        // RCLCPP_INFO(this->get_logger(),"already visited");
                         continue;
                     }
                     if (y >= map->info.height || x >= map->info.width){
-                        RCLCPP_INFO(this->get_logger(),"out of range2");
+                        // RCLCPP_INFO(this->get_logger(),"out of range2");
                         continue;
                     }
                     visited[{y, x}] = true;
-                    RCLCPP_INFO(this->get_logger(), "x : %d, y : %d, visit? : %d", x, y, visited[{y, x}]);
+                    // RCLCPP_INFO(this->get_logger(), "x : %d, y : %d, visit? : %d", x, y, visited[{y, x}]);
                     q.push({y + 1, x});
                     q.push({y - 1, x});
                     q.push({y, x + 1});
@@ -262,46 +290,29 @@ class Exploration_map : public rclcpp::Node
             auto obstacles = GetObstacleShapes(laser_scan, robot_y, robot_x, robot_theta, map);
 
             publishObstaclePoints(obstacles);
-            FloodFill(obstacles, map);
+            ObstacleFloodFill(obstacles, map);
         }
 
-        void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg){
-            if(msg->data.empty()){
-                RCLCPP_WARN(this->get_logger(), "Empty map");
-                return;
+
+        std::map<P, bool> transformVisited(double origin_x, double origin_y, double last_origin_x, double last_origin_y){
+            std::map<P, bool> transformed_visited; // 변환이 완전히 안되는지 탐색완료된 장애물 내부에 격자로 미탐색구역으로 남음
+            for(auto iter : visited){
+                double actual_x = iter.first.second * resolution + last_origin_x;
+                double actual_y = iter.first.first * resolution + last_origin_y;
+
+                double dx = origin_x - last_origin_x;
+                double dy = origin_y - last_origin_y;
+
+                actual_x += dx;
+                actual_y += dy;
+
+                unsigned int pixel_x = (actual_x - origin_x) / resolution;
+                unsigned int pixel_y = (actual_y - origin_y) / resolution;
+
+                transformed_visited[{pixel_y, pixel_x}] = iter.second;
             }
-            // RCLCPP_INFO(this->get_logger(),"Map sub");
-            map_ = msg;
-            i_sub_map = true;
-
-
-            if(last_width_ != map_->info.width || last_height_ != map_->info.height){
-                origin_x = map_->info.origin.position.x;
-                origin_y = map_->info.origin.position.y;
-                width = map_->info.width;
-                height = map_->info.height;
-                resolution = map_->info.resolution;
-                visited.clear(); // 해당 함수, 좌표변환 메커니즘 적용시킬 것.
-                RCLCPP_INFO(this->get_logger(),"W : %d, H : %d, origin x : %f, origin y : %f", width, height, origin_x, origin_y);
-                RCLCPP_INFO(this->get_logger(),"Map size : %ld", visited.size());
-                RCLCPP_INFO(this->get_logger(),"Map begin : %d, %d ", visited.begin()->first.first, visited.begin()->first.second);
-                last_width_ = width;
-                last_height_ = height;
-            }
-
-            search();
-
-            publishVisitedPoints();
-
-        }
-
-        void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg){
-            last_pose_ = *msg;
-            i_sub_pose = true;
-            if(!first_move && !first_scan){
-                RCLCPP_INFO(this->get_logger(),"Pose first sub");
-                first_move = true;
-            }
+            visited.clear();
+            return transformed_visited;
         }
 
         void publishVisitedPoints() {
@@ -402,16 +413,12 @@ class Exploration_map : public rclcpp::Node
             goal_msg.header.stamp = this->now();
             goal_msg.header.frame_id = "map";
 
-
-            visited[goal] = true;
-
             goal_msg.pose.position.y = origin_y + goal.first * resolution;
             goal_msg.pose.position.x = origin_x + goal.second * resolution;
 
             RCLCPP_INFO(this->get_logger(), "Goal : (x : %f, y : %f)", goal_msg.pose.position.x, goal_msg.pose.position.y);
             jobdone = false;
             goal_pub_->publish(goal_msg);
-            // rclcpp::sleep_for(std::chrono::milliseconds(100));
         }
 
         void setGoal(const geometry_msgs::msg::PoseStamped &pose_,
@@ -482,16 +489,18 @@ class Exploration_map : public rclcpp::Node
         bool first_move = false;
         bool first_scan = false;
         P current_goal;
+        P last_fail_point;
         std::map<P, bool> visited;
 
         double origin_x = 0.0;
         double origin_y = 0.0;
+        double last_origin_x = 0.0;
+        double last_origin_y = 0.0;
 
         float resolution = 0.0;
         uint32_t width = 0;
         uint32_t height = 0;
-        uint32_t last_width_ = 0;
-        uint32_t last_height_ = 0;
+
 
 
         geometry_msgs::msg::PoseStamped last_pose_;
