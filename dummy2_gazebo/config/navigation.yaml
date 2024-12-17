@@ -225,11 +225,6 @@ global_costmap:
     ros__parameters:
       use_sim_time: False
 
-map_server:
-  ros__parameters:
-    use_sim_time: False
-    yaml_filename: "/home/jiwon/jiwon_ws/src/dummy2/dummy2_gazebo/worlds/simple_map/my_map2.yaml"
-
 
 map_saver:
   ros__parameters:

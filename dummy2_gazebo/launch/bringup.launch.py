@@ -50,7 +50,7 @@ def generate_launch_description():
         ),
         launch_arguments={
             'slam' : "1",
-            'map' : os.path.join(pkg_dummy2, 'worlds/simple_map', 'empty.yaml'),
+            # 'map' : os.path.join(pkg_dummy2, 'worlds/simple_map', 'empty.yaml'),
             'params_file': configured_nav2_params,
         }.items()
     )
@@ -66,16 +66,6 @@ def generate_launch_description():
             os.path.join(pkg_dummy2, 'launch', 'description.launch.py')
         )
     )
-    initial_pose_node = Node(
-        package= 'dummy2_gazebo',
-        executable= 'initial_pose_publisher',
-        output= 'screen',
-        parameters= [{
-            'initial_x' : 0.0,
-            'initial_y' : 0.0,
-            'initial_yaw': 0.0,
-        }]
-    )
 
     ld = LaunchDescription()
     ld.add_action(world_config)
@@ -89,5 +79,4 @@ def generate_launch_description():
             period=0.0,
             actions=[nav_bringup]
             ))
-    ld.add_action(initial_pose_node)
     return ld
