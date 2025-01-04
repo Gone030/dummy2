@@ -20,12 +20,9 @@ def generate_launch_description():
         description='SDF world file'
     )
 
-    bringup_dir = get_package_share_directory('sim_car')
-    launch_dir = os.path.join(bringup_dir, 'launch')
     rviz_config_path = os.path.join(pkg_dummy2, 'config', 'rviz2_config.rviz')
     start_rviz2_cmd = ExecuteProcess(
         cmd=['rviz2', '--display-config', rviz_config_path],
-        cwd=[launch_dir],
         output='screen'
     )
 

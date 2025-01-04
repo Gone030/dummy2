@@ -16,12 +16,13 @@
 #include <queue>
 #include <cmath>
 #include <map>
-#include <stack>
+#include <limits>
 #include <vector>
 #include <string>
 #include <utility>
 
 using P = std::pair<unsigned int, unsigned int>;
+
 
 class MapManager {
     private:
@@ -32,6 +33,12 @@ class MapManager {
         MapManager& operator=(MapManager&&) = delete;
 
 
+        struct Sector{
+            double sector_origin_x;
+            double sector_origin_y;
+            bool visited_sector;
+        };
+        std::vector<Sector> Sectors_;
         std::map<P, bool> visited_;
         std::set<std::pair<double, double>> obstacle_mask_;
         MapManager() {}
@@ -43,7 +50,11 @@ class MapManager {
         }
 
         bool isVisited(unsigned int y, unsigned int x){
-            return visited_[{y, x}];
+            if(visited_.find({y, x}) == visited_.end()){
+                return false;
+            }else{
+                return visited_[{y, x}];
+            }
         }
 
         void setVisited(unsigned int y, unsigned int x, bool value){
@@ -70,11 +81,15 @@ class MapManager {
             obstacle_mask_.insert({y, x});
         }
 
-        std::map<P, bool>& getVisited() {
+        int getVisitedSize(){
+            return (int)visited_.size();
+        }
+
+        std::map<P, bool>& getVisited(){
             return visited_;
         }
 
-        const std::set<std::pair<double, double>>& getObstacleMask() const {
+        const std::set<std::pair<double, double>>& getObstacleMask() const{
             return obstacle_mask_;
         }
 };
@@ -115,13 +130,18 @@ class Exploration_map : public rclcpp::Node
     protected:
 
         void timer_callback(){
-            if(scan_init) { return; }
-            RCLCPP_INFO(this->get_logger(),"System status : map = %d , pose = %d, jobdone = %d", i_sub_map, i_sub_pose, jobdone);
-            if(i_sub_map && i_sub_pose & jobdone){
-                setGoal(last_pose_, map_);
-                i_sub_map = false;
+            // RCLCPP_INFO(this->get_logger(),"System status : map = %d , pose = %d, jobdone = %d", i_sub_map, i_sub_pose, jobdone);
+            if(jobdone && map_data_stable && searching){
                 i_sub_pose = false;
                 jobdone = false;
+                searching = false;
+
+                if(map_expanding){
+                    setGoalBasedonFrontier(map_, MapManager::getInstance(), last_pose_);
+                }else{
+                    setGoal(last_pose_, map_);
+                }
+
             }
         }
 
@@ -134,16 +154,6 @@ class Exploration_map : public rclcpp::Node
                     RCLCPP_WARN(this->get_logger(), "Failed to compute pose.");
                     fail_count++;
                     MapManager::getInstance().setVisited(current_pixel_goal, true);
-                    // if(fail_count == 3){
-                    //     scan_init = true;
-                    //     break;
-                    // }
-                    // else if(fail_count > 5){
-                    //     // FailFloodfill(current_pixel_goal.first, current_pixel_goal.second);
-                    //     fail_count = 0;
-                    // }
-                    // 박스 장애물 안 -1 Array 는 어떻게 처리해야 빨리 확인할까? => floodfill
-
                 }
                 else if(node_name_ == "FollowPath" && current_status_ == "SUCCESS"){
                     RCLCPP_INFO(this->get_logger(), "SUCCEED to move.");
@@ -154,23 +164,19 @@ class Exploration_map : public rclcpp::Node
                 }
                 if(node_name_ == "RateController" && current_status_ == "IDLE"){
                     RCLCPP_INFO(this->get_logger(), "READY 2 MOVE");
-                    MapManager::getInstance().setVisited(current_pixel_goal, true);
+                    excludeObstacle(laser_msg_, last_pose_, map_); // 장애물 판별 및 장애물 내부를 목표로 지정하지 않도록 함
+
+                    clearAround(map_, MapManager::getInstance(), last_pose_);
                      // 새로운 문제. 이동 완료했음에도 이미 전송된 좌표들이 많아서 그 자리서 왔다갔다함
                       // 맵 확장될 때 마다 visited map 초기화로 해결 <- 기존에 탐색한 장애물도 초기화돼서 다시 탐색해야하는 비효율적인 동작 발생
                       // transform 함수 새로 만들어서 해결
-                    scan_init = true;
 
                     jobdone = true;
                 }
             }
         }
         void scan_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg){
-            if(scan_init){
-                RCLCPP_INFO(this->get_logger(),"scan init");
-                laser_msg = msg;
-                excludeObstacle(laser_msg, last_pose_, map_);//visited, map_);
-            }
-            else{ return; }
+            laser_msg_ = msg;
         }
 
         void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg){
@@ -178,30 +184,26 @@ class Exploration_map : public rclcpp::Node
                 RCLCPP_WARN(this->get_logger(), "Empty map");
                 return;
             }
-            // RCLCPP_INFO(this->get_logger(),"Map sub");
-            // nav_msgs::msg::OccupancyGrid map = *msg;
+
             map_ = *msg;
-            i_sub_map = true;
-
-
-            if(last_origin_x != map_.info.origin.position.x || last_origin_y != map_.info.origin.position.y ||
-               last_width != map_.info.width || last_height != map_.info.height){
-
-                transformVisited(map_, last_origin_x, last_origin_y);
+            if(!i_sub_map){
                 search(map_);
-                applyMaskToMask(map_.info.origin.position.x, map_.info.origin.position.y, map_.info.resolution);
-                last_origin_x = map_.info.origin.position.x;
-                last_origin_y = map_.info.origin.position.y;
-                last_width = map_.info.width;
-                last_height = map_.info.height;
-            }else{
-                search(map_);
-                applyMaskToMask(map_.info.origin.position.x, map_.info.origin.position.y, map_.info.resolution);
+                publishVisitedPoints(map_);
+                i_sub_map = true;
+                return;
+            }
+            if (isMapExpanding(map_)) {
+                transformVisited(map_);  // 지도 확장 시에만
+                map_expanding = true;
+            }
+            else{
+                map_expanding = false;
             }
 
-
-            publishVisitedPoints(map_);
-
+            search(map_); // map.data 에 따른 미탐색구역 visited 맵으로 동기화
+            applyMaskToMask(map_.info.origin.position.x, map_.info.origin.position.y, map_.info.resolution); // 이미 판별한 장애물을 저장
+            publishVisitedPoints(map_); // visited 맵 시각화
+            searching = true;
         }
 
         void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg){
@@ -213,21 +215,39 @@ class Exploration_map : public rclcpp::Node
             }
         }
 
-        // void setanothergoal(double goal_y, double goal_x, const sensor_msgs::msg::LaserScan::SharedPtr& laser_data, ){
+        bool isMapExpanding(const nav_msgs::msg::OccupancyGrid& map){
+            static unsigned int last_width = map.info.width;
+            static unsigned int last_height = map.info.height;
+            static double last_origin_x = map.info.origin.position.x;
+            static double last_origin_y = map.info.origin.position.y;
 
-        // }
+            if(last_width != map.info.width || last_height != map.info.height){
+                last_width = map.info.width;
+                last_height = map.info.height;
+                return true;
+            }
+            if(last_origin_x != map.info.origin.position.x || last_origin_y != map.info.origin.position.y){
+                last_origin_x = map.info.origin.position.x;
+                last_origin_y = map.info.origin.position.y;
+                return true;
+            }
+            return false;
+        }
 
-
-
-        void FailFloodfill(unsigned int sp_y, unsigned int sp_x){ // 다시 점검
-            if(sp_x >= map_.info.width || sp_y >= map_.info.height) return;
-            MapManager& mm = MapManager::getInstance();
-            if(mm.isVisited(sp_y, sp_x) || mm.isVisited(sp_y + 1, sp_x) || mm.isVisited(sp_y - 1, sp_x) || mm.isVisited(sp_y, sp_x + 1) || mm.isVisited(sp_y, sp_x - 1)) return;
-            mm.markVisited({sp_y, sp_x});
-            FailFloodfill(sp_y, sp_x + 1);
-            FailFloodfill(sp_y, sp_x - 1);
-            FailFloodfill(sp_y + 1, sp_x);
-            FailFloodfill(sp_y - 1, sp_x);
+        void clearAround(const nav_msgs::msg::OccupancyGrid& map,
+                         MapManager& mm,
+                         const geometry_msgs::msg::PoseStamped& robot_pose){
+            unsigned int pixel_y = (robot_pose.pose.position.y - map.info.origin.position.y) / map.info.resolution;
+            unsigned int pixel_x = (robot_pose.pose.position.x - map.info.origin.position.x) / map.info.resolution;
+            unsigned int clear_range = 10;
+            for(unsigned int y = pixel_y - clear_range ; y < pixel_y + clear_range; y++){
+                for(unsigned int x = pixel_x - clear_range ; x < pixel_x + clear_range; x++){
+                    if(y >= map.info.height || x >= map.info.width || x < 5 || y < 5){
+                        continue;
+                    }
+                    mm.markVisited({y, x});
+                }
+            }
         }
 
         std::vector<std::vector<P>> GetObstacleShapes(const sensor_msgs::msg::LaserScan::SharedPtr& laser_scan,
@@ -303,10 +323,10 @@ class Exploration_map : public rclcpp::Node
 
         void ObstacleFloodFill(const std::vector<std::vector<P>>& obstacles,
                        const nav_msgs::msg::OccupancyGrid& map){
-            RCLCPP_INFO(this->get_logger(),"flood fill");
-            int temp_size = obstacles.size();
+            // RCLCPP_INFO(this->get_logger(),"flood fill");
+            // int temp_size = obstacles.size();
             MapManager& mm = MapManager::getInstance();
-            RCLCPP_INFO(this->get_logger(),"obstacles size : %d ",temp_size);
+            // RCLCPP_INFO(this->get_logger(),"obstacles size : %d ",temp_size);
             for(const auto& obstacle : obstacles){
                 if(obstacle.size() < 3) continue;
                 std::queue<P> q;
@@ -329,7 +349,7 @@ class Exploration_map : public rclcpp::Node
                     continue;
                 }
                 q.push({seed_y, seed_x});
-                unsigned int temp_offset = 5;
+                unsigned int temp_offset = 7;
                 while(!q.empty()){
                     // int temp = q.size();
                     // RCLCPP_INFO(this->get_logger(), "q.size : %d", temp);
@@ -367,8 +387,8 @@ class Exploration_map : public rclcpp::Node
 
             publishObstaclePoints(obstacles, map);
             ObstacleFloodFill(obstacles, map);
-            scan_init = false;
-            jobdone = true;
+            // publishVisitedPoints(map);
+            // jobdone = true;
             RCLCPP_INFO(this->get_logger(),"scan obstacle done");
 
         }
@@ -384,19 +404,20 @@ class Exploration_map : public rclcpp::Node
         }
 
 
-        void transformVisited(const nav_msgs::msg::OccupancyGrid& map,
-                              const double& l_origin_x, const double& l_origin_y){
+        void transformVisited(const nav_msgs::msg::OccupancyGrid& map){
             std::map<P, bool> transformed_visited;
+            static double last_origin_x = map.info.origin.position.x;
+            static double last_origin_y = map.info.origin.position.y;
             double origin_x = map.info.origin.position.x;
             double origin_y = map.info.origin.position.y;
             double resolution = map.info.resolution;
             MapManager& mm = MapManager::getInstance();
             for(auto iter : mm.getVisited()){
-                double actual_x = iter.first.second * resolution + l_origin_x;
-                double actual_y = iter.first.first * resolution + l_origin_y;
+                double actual_x = iter.first.second * resolution + last_origin_x;
+                double actual_y = iter.first.first * resolution + last_origin_y;
 
-                double dx = origin_x - l_origin_x;
-                double dy = origin_y - l_origin_y;
+                double dx = origin_x - last_origin_x;
+                double dy = origin_y - last_origin_y;
 
                 actual_x += dx;
                 actual_y += dy;
@@ -406,37 +427,58 @@ class Exploration_map : public rclcpp::Node
 
                 transformed_visited[{pixel_y, pixel_x}] = iter.second;
             }
+            last_origin_x = map.info.origin.position.x;
+            last_origin_y = map.info.origin.position.y;
             mm.clearVisited();
             mm.getVisited() = transformed_visited;
         }
 
         void publishVisitedPoints(const nav_msgs::msg::OccupancyGrid& map) {
-            //visited 맵 시각화
-            visualization_msgs::msg::Marker points_visited;
-            points_visited.header.frame_id = "map";
-            points_visited.header.stamp = this->get_clock()->now();
-            points_visited.ns = "visited_points";
-            points_visited.id = 0;
-            points_visited.type = visualization_msgs::msg::Marker::POINTS;
-            points_visited.action = visualization_msgs::msg::Marker::ADD;
-            points_visited.scale.x = 0.025;  // 점 크기 설정 (m 단위)
-            points_visited.scale.y = 0.025;
-            points_visited.color.a = 1.0;   // 점 투명도 설정
-            points_visited.color.r = 1.0;
-            points_visited.color.g = 0.0;
-            points_visited.color.b = 0.0;
+            // 미탐색 좌표 시각화
+            visualization_msgs::msg::Marker points_unexplored;
+            points_unexplored.header.frame_id = "map";
+            points_unexplored.header.stamp = this->get_clock()->now();
+            points_unexplored.ns = "unexplored_points";
+            points_unexplored.id = 0;
+            points_unexplored.type = visualization_msgs::msg::Marker::POINTS;
+            points_unexplored.action = visualization_msgs::msg::Marker::ADD;
+            points_unexplored.scale.x = 0.05;
+            points_unexplored.scale.y = 0.05;
+            points_unexplored.color.a = 1.0;
+            points_unexplored.color.r = 1.0; // 빨간색
+            points_unexplored.color.g = 0.0;
 
+            // 탐색 완료된 좌표 시각화
+            visualization_msgs::msg::Marker points_explored;
+            points_explored.header.frame_id = "map";
+            points_explored.header.stamp = this->get_clock()->now();
+            points_explored.ns = "explored_points";
+            points_explored.id = 1;
+            points_explored.type = visualization_msgs::msg::Marker::POINTS;
+            points_explored.action = visualization_msgs::msg::Marker::ADD;
+            points_explored.scale.x = 0.05;
+            points_explored.scale.y = 0.05;
+            points_explored.color.a = 1.0;
+            points_explored.color.r = 0.0;
+            points_explored.color.g = 1.0; // 초록색
+
+            // 점 생성 및 추가
             for (const auto& itr : MapManager::getInstance().getVisited()) {
-                if (itr.second == false) { // 아직 방문되지 않은 좌표만 추가
-                    geometry_msgs::msg::Point p;
-                    p.y = itr.first.first * map.info.resolution + map.info.origin.position.y;
-                    p.x = itr.first.second * map.info.resolution + map.info.origin.position.x;
-                    p.z = 0.0;
-                    points_visited.points.push_back(p);
+                geometry_msgs::msg::Point p;
+                p.y = itr.first.first * map.info.resolution + map.info.origin.position.y;
+                p.x = itr.first.second * map.info.resolution + map.info.origin.position.x;
+                p.z = 0.0;
+
+                if (!itr.second) { // 미탐색 좌표
+                    points_unexplored.points.push_back(p);
+                } else { // 탐색 완료 좌표
+                    points_explored.points.push_back(p);
                 }
             }
 
-            visit_marker_pub_->publish(points_visited);
+            // 퍼블리시
+            visit_marker_pub_->publish(points_unexplored);
+            // visit_marker_pub_->publish(points_explored);
         }
         void publishObstaclePoints(const std::vector<std::vector<P>> obstacles,
                                    const nav_msgs::msg::OccupancyGrid& map) {
@@ -493,22 +535,42 @@ class Exploration_map : public rclcpp::Node
             // RCLCPP_INFO(this->get_logger(),"search");
             MapManager& mm = MapManager::getInstance();
 
+
             static std::vector<int8_t> last_map_data;
 
             if(last_map_data.empty()){
                 last_map_data = map.data;
             }
 
-            for(unsigned int y = 10; y < map.info.height - 10; y++){
-                for(unsigned int x = 10; x < map.info.width - 10; x++){
-                    unsigned int idx = pixelcoordtoidx(y, x, map.info.width);
+            unsigned int height = map.info.height;
+            unsigned int width = map.info.width;
+
+
+            for(unsigned int y = 10; y < height - 10; y++){
+                for(unsigned int x = 10; x < width - 10; x++){
+                    unsigned int idx = pixelcoordtoidx(y, x, width);
                     if(last_map_data[idx] != map.data[idx]){
+                        map_data_stable = false;
                         if(map.data[idx] == -1){
                             mm.insertVisited(y, x, false);
                         }else{
                             mm.setVisited(y, x, true);
                         }
+                    }else{
+                        map_data_stable = true;
                     }
+                }
+            }
+
+            for(unsigned int y = 0; y <= 10; y++){
+                for(unsigned int x = 0; x <= 10; x++){
+                    mm.markVisited({y,x});
+                }
+            }
+
+            for(unsigned int y = height - 10; y <= height ; y++){
+                for(unsigned int x = width - 10; x <= width ; x++){
+                    mm.markVisited({y, x});
                 }
             }
             last_map_data = map.data;
@@ -523,8 +585,50 @@ class Exploration_map : public rclcpp::Node
             goal_msg.pose.position.x = map.info.origin.position.x + goal.second * map.info.resolution;
 
             RCLCPP_INFO(this->get_logger(), "Goal : (x : %f, y : %f)", goal_msg.pose.position.x, goal_msg.pose.position.y);
-            jobdone = false;
+
             goal_pub_->publish(goal_msg);
+        }
+
+        void setGoalBasedonFrontier(const nav_msgs::msg::OccupancyGrid& map, MapManager& mm, const geometry_msgs::msg::PoseStamped& robot_pose){
+            const int directions[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, -1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
+            RCLCPP_INFO(this->get_logger(),"set goal based on frontier");
+            unsigned int map_width = (unsigned int)map.info.width;
+            unsigned int map_height = (unsigned int)map.info.height;
+
+            std::vector<P> frontier;
+
+            for(unsigned int x = 0; x < map_width; x++){
+                for(unsigned int y = 0; y < map_height; y++){
+                    if(map.data[pixelcoordtoidx(y, x, map_width)] != 0 || mm.isVisited(y, x)){
+                        // mm.markVisited({y, x});
+                        continue;
+                    }
+                    for(const auto& dir : directions){
+                        unsigned int nx = x + dir[0];
+                        unsigned int ny = y + dir[1];
+                        if(nx < map_width && ny < map_height){
+                            if(map.data[pixelcoordtoidx(ny, nx, map_width)] == 100 || mm.isVisited(ny, nx)){
+                                frontier.push_back({y, x});
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if(!frontier.empty()){
+                P goal = frontier[0];
+                unsigned int pixel_y = (robot_pose.pose.position.y - map.info.origin.position.y) / map.info.resolution;
+                unsigned int pixel_x = (robot_pose.pose.position.x - map.info.origin.position.x) / map.info.resolution;
+                double min_dist = std::numeric_limits<double>::infinity();
+                for(const auto& point : frontier){
+                    double dist = distance(point, {pixel_y, pixel_x});
+                    if(dist < min_dist){
+                        min_dist = dist;
+                        goal = point;
+                    }
+                }
+                pubGoal(goal, map);
+            }
         }
 
         void setGoal(const geometry_msgs::msg::PoseStamped& robot_pose,
@@ -536,7 +640,7 @@ class Exploration_map : public rclcpp::Node
             unsigned int pixel_x = (robot_pose.pose.position.x - map.info.origin.position.x) / map.info.resolution;
             P current_pixel_coord = {pixel_y, pixel_x};
             if (pixel_y >= map.info.height || pixel_x >= map.info.width) {
-                RCLCPP_ERROR(this->get_logger(), "Invalid current_pixel_coord: (%u, %u)", pixel_y, pixel_x);
+                // RCLCPP_ERROR(this->get_logger(), "Invalid current_pixel_coord: (%u, %u)", pixel_y, pixel_x);
                 return;
             }
             double min_dist = std::numeric_limits<double>::max();
@@ -546,14 +650,14 @@ class Exploration_map : public rclcpp::Node
                     if(itr.first.first >= map.info.height || itr.first.second >= map.info.width){ continue; }
                     unsigned int temp_idx = pixelcoordtoidx(itr.first.first, itr.first.second, map.info.width);
                     if (temp_idx >= map.data.size()) {
-                        RCLCPP_ERROR(this->get_logger(), "Invalid index: %u (map size: %zu)", temp_idx, map.data.size());
-                        RCLCPP_WARN(this->get_logger(), "P Coord x : %d, y : %d, width : %d", itr.first.second, itr.first.first, map.info.width);
+                        // RCLCPP_ERROR(this->get_logger(), "Invalid index: %u (map size: %zu)", temp_idx, map.data.size());
+                        // RCLCPP_WARN(this->get_logger(), "P Coord x : %d, y : %d, width : %d", itr.first.second, itr.first.first, map.info.width);
                         itr.second = true;
                         continue;
                     }
                     if(map.data[temp_idx] != -1){
                         itr.second = true;
-                        RCLCPP_INFO(this->get_logger(),"Already gone");
+                        // RCLCPP_INFO(this->get_logger(),"Already gone");
                         continue;
                     }
                     // RCLCPP_INFO(this->get_logger(),"visited[itr] = %d, map_->data[idx] = %d", itr.second, map_->data[temp_idx]);
@@ -566,16 +670,17 @@ class Exploration_map : public rclcpp::Node
                 }
             }
             if(near_goal == P{0, 0}){
-                RCLCPP_INFO(this->get_logger(),"All point visited");
+                // RCLCPP_INFO(this->get_logger(),"All point visited");
                 pubGoal({0, 0}, map);
             }else{
-                RCLCPP_INFO(this->get_logger(),"current position (%f, %f)", robot_pose.pose.position.x, robot_pose.pose.position.y);
-                RCLCPP_INFO(this->get_logger(),"current pixel position (%d, %d)", pixel_x, pixel_y);
-                RCLCPP_INFO(this->get_logger(),"set near goal (%d, %d), dist : %f", near_goal.first, near_goal.second, min_dist);
+                // RCLCPP_INFO(this->get_logger(),"current position (%f, %f)", robot_pose.pose.position.x, robot_pose.pose.position.y);
+                // RCLCPP_INFO(this->get_logger(),"current pixel position (%d, %d)", pixel_x, pixel_y);
+                // RCLCPP_INFO(this->get_logger(),"set near goal (%d, %d), dist : %f", near_goal.first, near_goal.second, min_dist);
                 current_pixel_goal = near_goal;
                 pubGoal(near_goal, map);
             }
         }
+
 
         ///C1 > C2
         double distance(P C1, P C2){
@@ -593,22 +698,20 @@ class Exploration_map : public rclcpp::Node
         bool i_sub_pose = false; // pose 수신하면 활성
         bool i_sub_map = false;
         bool jobdone = true; // 동작 완료 후 활성
-        bool scan_init = true;
+        bool scan_init = false;
+        bool searching = false;
+        bool map_data_stable = false;
+        bool map_expanding = false;
         bool first_move = false;
         bool first_scan = false;
         P current_pixel_goal;
         P last_fail_point;
 
-        double last_origin_x = 0.0;
-        double last_origin_y = 0.0;
-        double last_width = 0.0;
-        double last_height = 0.0;
-
 
         geometry_msgs::msg::PoseStamped last_pose_;
         nav_msgs::msg::OccupancyGrid map_;
         geometry_msgs::msg::PoseStamped goal_msg;
-        sensor_msgs::msg::LaserScan::SharedPtr laser_msg;
+        sensor_msgs::msg::LaserScan::SharedPtr laser_msg_;
 
         rclcpp::TimerBase::SharedPtr timer_;
         rclcpp::Subscription<nav2_msgs::msg::BehaviorTreeLog>::SharedPtr btl_sub;
