@@ -106,7 +106,7 @@ controller_server:
     min_theta_velocity_threshold: 0.001
     failure_tolerance: 0.3
     progress_checker_plugin: "progress_checker"
-    # goal_checker_plugins: ["general_goal_checker"]
+    goal_checker_plugins: ["general_goal_checker"]
     controller_plugins: ["FollowPath"]
 
     # Progress checker parameters
@@ -126,14 +126,13 @@ controller_server:
 
     FollowPath:
       plugin: "nav2_ackermann_controller::AckermannController"
-      # plugin: "nav2_line_following_controller::LineFollowingController"
       max_cte: 0.5
       max_velocity: 1.0
       max_reverse_velocity: 0.50
       max_acceleration: 1.5
       max_deceleration: 1.5
       lookahead_distance: 1.0
-      min_turn_radius: 0.5
+      min_turn_radius: 1.23
       transform_toreance: 0.1
 
 
@@ -156,7 +155,7 @@ local_costmap:
       resolution: 0.05
       origin_x: 0.0
       origin_y: 0.0
-      footprint: "[ [-0.30, -0.215], [-0.30, 0.215], [0.30, 0.215], [0.30, -0.215] ]"
+      footprint: "[ [-0.35, -0.221], [-0.35, 0.221], [0.35, 0.221], [0.35, -0.221] ]"
       footprint_padding: 0.0
       observation_sources: laser_scan_sensor
       laser_scan_sensor:
@@ -167,8 +166,7 @@ local_costmap:
         clearing: True
         max_obstacle_height: 2.0
         min_obstacle_height: 0.05
-        obstacle_range: 2.5
-        raytrace_range: 3.0
+
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
         plugin: "nav2_costmap_2d::ObstacleLayer"
@@ -188,7 +186,7 @@ local_costmap:
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
         cost_scaling_factor: 3.0
-        inflation_radius: 0.2
+        inflation_radius: 0.4
         enabled: True
       always_send_full_costmap: True
 
@@ -205,7 +203,7 @@ global_costmap:
       global_frame: map
       robot_base_frame: base_footprint
       use_sim_time: True
-      footprint: "[ [-0.30, -0.215], [-0.30, 0.215], [0.30, 0.215], [0.30, -0.215] ]"
+      footprint: "[ [-0.35, -0.221], [-0.35, 0.221], [0.35, 0.221], [0.35, -0.221] ]"
       resolution: 0.05
       static_map: false
       track_unknown_space: true
@@ -232,7 +230,7 @@ global_costmap:
         map_subscribe_transient_local: True
       inflation_layer:
         plugin: "nav2_costmap_2d::InflationLayer"
-        cost_scaling_factor: 1.0
+        cost_scaling_factor: 3.0
         inflation_radius: 0.40
       always_send_full_costmap: True
   global_costmap_client:
@@ -266,30 +264,29 @@ planner_server:
     planner_plugins: ["GridBased"]
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
-      downsample_costmap: false           # whether or not to downsample the map
-      downsampling_factor: 1              # multiplier for the resolution of the costmap layer (e.g. 2 on a 5cm costmap would be 10cm)
-      allow_unknown: true                # allow traveling in unknown space
-      max_iterations: 1000000             # maximum total iterations to search for before failing (in case unreachable), set to -1 to disable
-      max_planning_time: 5.0              # max time in s for planner to plan, smooth, and upsample. Will scale maximum smoothing and upsampling times based on remaining time after planning.
-      motion_model_for_search: "REEDS_SHEPP"    # For Hybrid Dubin, Redds-Shepp
+
+      minimum_turning_radius: 1.23     # For Hybrid/Lattice nodes: minimum turning radius in m of path / vehicle
+      allow_reverse_expansion: true     # For Hybrid nodes: allow reverse expansion
       angle_quantization_bins: 72         # For Hybrid nodes: Number of angle bins for search, must be 1 for 2D node (no angle search)
       analytic_expansion_ratio: 3.5       # For Hybrid/Lattice nodes: The ratio to attempt analytic expansions during search for final approach.
-      analytic_expansion_max_length: 3.0    # For Hybrid/Lattice nodes: The maximum length of the analytic expansion to be considered valid to prevent unsafe shortcutting (in meters). This should be scaled with minimum turning radius and be no less than 4-5x the minimum radius
-      minimum_turning_radius: 0.5     # For Hybrid/Lattice nodes: minimum turning radius in m of path / vehicle
-      reverse_penalty: 60.0                # For Reeds-Shepp model: penalty to apply if motion is reversing, must be => 1
-      change_penalty: 0.0                 # For Hybrid nodes: penalty to apply if motion is changing directions, must be >= 0
-      non_straight_penalty: 5.0          # For Hybrid nodes: penalty to apply if motion is non-straight, must be => 1
-      cost_penalty: 3.0                   # For Hybrid nodes: penalty to apply to higher cost areas when adding into the obstacle map dynamic programming distance expansion heuristic. This drives the robot more towards the center of passages. A value between 1.3 - 3.5 is reasonable.
-      lookup_table_size: 40.0               # For Hybrid nodes: Size of the dubin/reeds-sheep distance window to cache, in meters.
-      cache_obstacle_heuristic: false      # For Hybrid nodes: Cache the obstacle map dynamic programming distance expansion heuristic between subsiquent replannings of the same goal location. Dramatically speeds up replanning performance (40x) if costmap is largely static.
-      smooth_path: False                   # For Lattice/Hybrid nodes: Whether or not to smooth the path, always true for 2D nodes.
+      motion_model_for_search: "REEDS_SHEPP"    # For Hybrid Dubin, Redds-Shepp
 
-      smoother:
-        max_iterations: 1000
-        w_smooth: 0.1
-        w_data: 0.3
-        tolerance: 1e-10
-        do_refinement: true               # Whether to recursively run the smoother 3 times on the results from prior runs to refine the results further
+      cost_penalty: 1.5                   # For Hybrid nodes: penalty to apply to higher cost areas when adding into the obstacle map dynamic programming distance expansion heuristic. This drives the robot more towards the center of passages. A value between 1.3 - 3.5 is reasonable.
+      max_iterations: 1000000             # maximum total iterations to search for before failing (in case unreachable), set to -1 to disable
+      lookup_table_size: 20.0             # For Hybrid nodes: Size of the dubin/reeds-sheep distance window to cache, in meters.
+      cache_obstacle_heuristic: true      # For Hybrid nodes: Cache the obstacle map dynamic programming distance expansion heuristic between subsiquent replannings of the same goal location. Dramatically speeds up replanning performance (40x) if costmap is largely static.
+      tolerance: 0.25                     # For Hybrid/Lattice nodes: tolerance in meters for the planner to consider the goal reached
+
+      allow_unknown: false                # allow traveling in unknown space
+      lethal_cost_threshold: 253          # cost value at which the planner should consider a cell lethal
+      neutral_cost_threshold: 50          # cost value at which the planner should consider a cell neutral
+      change_penalty: 0.05                # For Hybrid nodes: penalty to apply if motion is changing directions, must be >= 0
+      reverse_penalty: 2.0                # For Reeds-Shepp model: penalty to apply if motion is reversing, must be => 1
+      non_straight_penalty: 1.20           # For Hybrid nodes: penalty to apply if motion is non-straight, must be => 1
+
+      smoothing_enabled: true              # enable path smoothing
+      smoothing_alpha: 0.1                 # path smoothing alpha parameter
+      smoothing_iterations: 3             # path smoothing iterations
 
 planner_server_rclcpp_node:
   ros__parameters:
