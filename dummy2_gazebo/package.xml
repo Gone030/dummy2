@@ -12,23 +12,23 @@
   <depend>ament_cmake</depend>
   <depend>rclcpp</depend>
   <depend>rclpy</depend>
+  <depend>nav_costmap_2d</depend>
+  <depend>gazebo_ros_pkgs</depend>
+  <depend>robot_state_publisher</depend>
+  <depend>tf_transformations</depend>
+  <depend>xacro</depend>
+  <depend>nav2_bringup</depend>
+  <depend>geometry_msgs</depend>
+  <depend>tf2</depend>
+  <depend>tf2_ros</depend>
+  <depend>nav_msgs</depend>
+  <depend>nav2_util</depend>
+  <depend>tf2_geometry_msgs</depend>
+  <depend>nav2_smac_planner</depend>
 
   <test_depend>ament_lint_auto</test_depend>
   <test_depend>ament_lint_common</test_depend>
 
-  <exec_depend>gazebo_ros_pkgs</exec_depend>
-  <exec_depend>robot_state_publisher</exec_depend>
-  <exec_depend>tf_transformations</exec_depend>
-  <exec_depend>xacro</exec_depend>
-  <exec_depend>nav2_bringup</exec_depend>
-  <exec_depend>nav_costmap_2d</exec_depend>
-  <exec_depend>geometry_msgs</exec_depend>
-  <exec_depend>tf2</exec_depend>
-  <exec_depend>tf2_ros</exec_depend>
-  <exec_depend>nav_msgs</exec_depend>
-  <exec_depend>nav2_util</exec_depend>
-  <exec_depend>tf2_geometry_msgs</exec_depend>
-  <exec_depend>nav2_smac_planner</exec_depend>
 
 
   <export>

@@ -148,8 +148,8 @@ Visualization Manager:
     - Alpha: 1
       Autocompute Intensity Bounds: true
       Autocompute Value Bounds:
-        Max Value: 0.3007739782333374
-        Min Value: 0.29918643832206726
+        Max Value: 0.3005794882774353
+        Min Value: 0.2994472086429596
         Value: true
       Axis: Z
       Channel Name: intensity
@@ -495,7 +495,7 @@ Visualization Manager:
       Enabled: true
       Name: Marker
       Namespaces:
-        obstacle_points: true
+        {}
       Topic:
         Depth: 5
         Durability Policy: Volatile
@@ -516,6 +516,19 @@ Visualization Manager:
         History Policy: Keep Last
         Reliability Policy: Reliable
         Value: /goal_points
+      Value: true
+    - Class: rviz_default_plugins/Marker
+      Enabled: true
+      Name: Marker
+      Namespaces:
+        lidar_line: true
+      Topic:
+        Depth: 5
+        Durability Policy: Volatile
+        Filter size: 10
+        History Policy: Keep Last
+        Reliability Policy: Reliable
+        Value: /laser_line
       Value: true
   Enabled: true
   Global Options:

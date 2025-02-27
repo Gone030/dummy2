@@ -157,7 +157,7 @@ local_costmap:
       origin_y: 0.0
       footprint: "[ [-0.35, -0.221], [-0.35, 0.221], [0.35, 0.221], [0.35, -0.221] ]"
       footprint_padding: 0.0
-      observation_sources: laser_scan_sensor
+      observation_sources: scan
       laser_scan_sensor:
         data_type: LaserScan
         sensor_frame: lidar_link
@@ -265,7 +265,7 @@ planner_server:
     GridBased:
       plugin: "nav2_smac_planner/SmacPlannerHybrid"
 
-      minimum_turning_radius: 1.23     # For Hybrid/Lattice nodes: minimum turning radius in m of path / vehicle
+      minimum_turning_radius: 1.30     # For Hybrid/Lattice nodes: minimum turning radius in m of path / vehicle
       allow_reverse_expansion: true     # For Hybrid nodes: allow reverse expansion
       angle_quantization_bins: 72         # For Hybrid nodes: Number of angle bins for search, must be 1 for 2D node (no angle search)
       analytic_expansion_ratio: 3.5       # For Hybrid/Lattice nodes: The ratio to attempt analytic expansions during search for final approach.
@@ -277,7 +277,7 @@ planner_server:
       cache_obstacle_heuristic: true      # For Hybrid nodes: Cache the obstacle map dynamic programming distance expansion heuristic between subsiquent replannings of the same goal location. Dramatically speeds up replanning performance (40x) if costmap is largely static.
       tolerance: 0.25                     # For Hybrid/Lattice nodes: tolerance in meters for the planner to consider the goal reached
 
-      allow_unknown: false                # allow traveling in unknown space
+      allow_unknown: true                # allow traveling in unknown space
       lethal_cost_threshold: 253          # cost value at which the planner should consider a cell lethal
       neutral_cost_threshold: 50          # cost value at which the planner should consider a cell neutral
       change_penalty: 0.05                # For Hybrid nodes: penalty to apply if motion is changing directions, must be >= 0
@@ -328,16 +328,18 @@ waypoint_follower:
 velocity_smoother:
   ros__parameters:
     smoothing_frequency: 20.0
-    scale_velocities: true
+    scale_velocities: false
     feedback: "OPEN_LOOP"
-    max_velocity: [10.0, 0.0, 15.0]
-    min_velocity: [-10.0, 0.0, -15.0]
-    deadband_velocity: [0.0, 0.0, 0.0]
+    max_velocity: [2.5, 0.0, 4.07]  # 최대 속도 [x, y, yaw]
+    min_velocity: [-2.0, 0.0, -4.07]  # 최소 속도 [x, y, yaw]
+    deadband_velocity: [0.0, 0.0, 0.0]  # 최소 속도 영역 (0으로 설정)
     velocity_timeout: 1.0
-    max_accel: [2.5, 0.0, 100.0]
-    max_decel: [-2.5, 0.0, -100.0]
-    odom_topic: "dummy2/odom"
-    odom_duration: 0.1
+    max_accel: [3.0, 0.0, 2.5]  # 최대 가속도 [x, y, yaw]
+    max_decel: [-4.5, 0.0, -3.75]  # 최대 감속도 [x, y, yaw] (감속은 가속보다 더 강하게)
+    use_realtime_priority: false  # 실시간 우선순위 설정 X
+    enable_stamped_cmd_vel: true
+    # odom_topic: "dummy2/odom"
+    # odom_duration: 0.1
 
 slam_toolbox:
   ros__parameters:
