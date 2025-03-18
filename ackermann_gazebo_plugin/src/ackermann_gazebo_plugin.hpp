@@ -103,7 +103,7 @@ namespace ackermann_gazebo_plugin{
                     jc->SetVelocityTarget(br_wheel_joint->GetScopedName(),
                                             getvelo(msg->linear.x));
                 } else {
-                    double curvature = msg->angular.z / msg->linear.x * WHEELBASE_LENGTH;
+                    double curvature = (msg->angular.z / msg->linear.x) * WHEELBASE_LENGTH;
                     double steer_angle = atan(curvature);
                     double limit_steer_angle = std::clamp(steer_angle, -MAX_STEER_ANGLE, MAX_STEER_ANGLE);
                     jc->SetPositionTarget(fr_str_joint->GetScopedName(),

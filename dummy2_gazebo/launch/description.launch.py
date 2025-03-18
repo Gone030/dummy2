@@ -18,9 +18,9 @@ def generate_launch_description():
         executable="spawn_entity.py",
         arguments=["-topic", "/robot_description",
                    "-entity", "dummy2",
-                   "-x", "8.5",
-                   "-y", "-2.0",
-                   "-Y", "3.14"
+                   "-x", "0.0",
+                   "-y", "0.0",
+                   "-Y", "0.0"
                    ]
     )
 
