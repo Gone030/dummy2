@@ -136,9 +136,7 @@ class PoseManager{
             m.getRPY(roll, pitch, yaw);
 
             double theta = yaw;
-            // if(theta < 0){
-            //     theta += 2 * M_PI; // 0 ~ 360 반시계방향, 정면이 0도
-            // }
+
             return theta;
         }
         bool isitstuckhere(const geometry_msgs::msg::PoseStamped& pose){
@@ -209,7 +207,7 @@ class LaserManager{
         }
 
 };
-
+/*
 class ObstacleAvoider {
     public:
     ObstacleAvoider(rclcpp::Node* node) : node_(node) {
@@ -357,7 +355,7 @@ class ObstacleAvoider {
         rclcpp::Node::SharedPtr node_;
         rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
     };
-
+*/
 class Exploration_map : public rclcpp::Node
 {
     public:
@@ -390,7 +388,7 @@ class Exploration_map : public rclcpp::Node
             best_heading_dir_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("safe_way", 10);
             laser_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("laser_line", 10);
             goal_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("goal_points", 10);
-            obstacle_avoider_ = std::make_shared<ObstacleAvoider>(this);
+            // obstacle_avoider_ = std::make_shared<ObstacleAvoider>(this);
 
             timer_ = this->create_wall_timer(std::chrono::seconds(1), std::bind(&Exploration_map::timer_callback, this));
 
@@ -406,7 +404,7 @@ class Exploration_map : public rclcpp::Node
                 searching = false;
 
                 if(expand_map_sq){
-                    setGoalBasedonFrontier(map_, MapManager::getInstance(), PoseManager::getInstance());
+                    setGoalBasedonFrontier(map_, PoseManager::getInstance());
                 }
                 else{
                     setGoal(map_);
@@ -511,9 +509,9 @@ class Exploration_map : public rclcpp::Node
             i_sub_pose = true;
 
             PoseManager::getInstance().setLastPose(*msg);
-            if(force_move){
-                force_move = !obstacle_avoider_->checkSurroundingsAndEvacuate(map_);
-            }
+            // if(force_move){
+            //     force_move = !obstacle_avoider_->checkSurroundingsAndEvacuate(map_);
+            // }
 
 
 
@@ -949,7 +947,7 @@ class Exploration_map : public rclcpp::Node
             // RCLCPP_WARN(this->get_logger(), "로봇기준 목표와의 각도차 : %d ", theta_with_robot_goal_deg);
 
             publishscanPoints(LM.getLaserMsg(), index, relative_angle_to_goal);
-            RCLCPP_INFO(this->get_logger(), "index : %d", index);
+            RCLCPP_INFO(this->get_logger(), "index at goal direction : %d", index);
 
             double range_at_angle = LM.getLaserMsg().ranges[index];
 
@@ -978,7 +976,7 @@ class Exploration_map : public rclcpp::Node
         void setGoalbesideObstacle(const sensor_msgs::msg::LaserScan& laser_scan,
                                    const geometry_msgs::msg::PoseStamped& robot_pose,
                                    const nav_msgs::msg::OccupancyGrid& map,
-                                   const int& angle, double dist_goal, int fail_count
+                                   const int& start_index, double dist_goal, int fail_count
                                    ){
             double robot_x = robot_pose.pose.position.x;
             double robot_y = robot_pose.pose.position.y;
@@ -989,8 +987,8 @@ class Exploration_map : public rclcpp::Node
             double another_goal_y = 0.0;
             double laser_angle = 0.0; // deg
 
-            int index = angle;
-            if(angle == 1 || angle == 359){
+            int index = start_index;
+            if(start_index == 1 || start_index == 359){
                 index = 0;
             }
 
@@ -1019,12 +1017,12 @@ class Exploration_map : public rclcpp::Node
                 int offset = 5;
                 if(dist_diff_pos > 0.25){
                     laser_angle = pos_dir + offset;
-                    RCLCPP_INFO(this->get_logger(),"positive side goal set");
+                    RCLCPP_INFO(this->get_logger(),"positive side goal set, laser_angle : %f", laser_angle);
                     break;
                 }
                 if(dist_diff_neg > 0.25){
                     laser_angle = neg_dir - offset;
-                    RCLCPP_INFO(this->get_logger(),"negative side goal set");
+                    RCLCPP_INFO(this->get_logger(),"negative side goal set, laser_angle : %f", laser_angle);
                     break;
                 }
 
@@ -1038,14 +1036,15 @@ class Exploration_map : public rclcpp::Node
             double safe_margin = min_margin + k * dist_goal;
             safe_margin = std::clamp(safe_margin, min_margin, max_margin);
 
-            // double robot_theta = PoseManager::getInstance().getRobotdirection();
-            double laser_angle_rad = laser_angle * M_PI / 180.0 ;//+ robot_theta;
+            double robot_theta = PoseManager::getInstance().getRobotdirection();
+            double laser_angle_rad = laser_angle * M_PI / 180.0 + robot_theta;
             laser_angle_rad = std::fmod(laser_angle_rad + M_PI, 2 * M_PI) - M_PI;
-            RCLCPP_ERROR(this->get_logger(), "laser_angle : %f", laser_angle_rad * 180 / M_PI);
+            double robot_std_dir = laser_angle_rad - M_PI;
 
-            another_goal_x = (dist_goal + safe_margin) * cos(laser_angle_rad) + robot_x;
+
+            another_goal_x = (dist_goal + safe_margin) * cos(robot_std_dir) + robot_x;
             another_goal_x = std::clamp(another_goal_x , origin_x + 0.5, origin_x + map.info.width * map.info.resolution - 0.5);
-            another_goal_y = (dist_goal + safe_margin) * sin(laser_angle_rad) + robot_y;
+            another_goal_y = (dist_goal + safe_margin) * sin(robot_std_dir) + robot_y;
             another_goal_y = std::clamp(another_goal_y , origin_y + 0.5 , origin_y + map.info.height * map.info.resolution - 0.5);
 
             double another_dist = std::hypot(another_goal_x - robot_x, another_goal_y - robot_y);
@@ -1078,7 +1077,7 @@ class Exploration_map : public rclcpp::Node
             // RCLCPP_INFO(this->get_logger(), "Goal_pixel : (x : %d, y : %d)", goal.second, goal.first);
             goal_msg.pose.position.y = map.info.origin.position.y + goal.first * map.info.resolution;
             goal_msg.pose.position.x = map.info.origin.position.x + goal.second * map.info.resolution;
-            // goal_msg.pose.position.x = 5.0;
+            // goal_msg.pose.position.x = 5.0; // for test
             // goal_msg.pose.position.y = 0.0;
             RCLCPP_INFO(this->get_logger(), "초기 목표 : (x : %f, y : %f)", goal_msg.pose.position.x, goal_msg.pose.position.y);
             if(goal_msg.pose.position.x > 20000.0 || goal_msg.pose.position.y > 20000.0){
@@ -1125,7 +1124,8 @@ class Exploration_map : public rclcpp::Node
             return {0, 0};
         }
 
-        void setGoalBasedonFrontier(const nav_msgs::msg::OccupancyGrid& map, MapManager& mm, PoseManager& PM){
+
+        void setGoalBasedonFrontier(const nav_msgs::msg::OccupancyGrid& map, PoseManager& PM){
             const int directions[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, -1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
             RCLCPP_INFO(this->get_logger(),"set goal based on frontier");
             unsigned int map_width = (unsigned int)map.info.width;
@@ -1138,15 +1138,14 @@ class Exploration_map : public rclcpp::Node
 
             for(unsigned int x = 0; x < map_width; x++){
                 for(unsigned int y = 0; y < map_height; y++){
-                    if(map.data[pixelcoordtoidx(y, x, map_width)] != 0 || mm.isVisited(y, x)){
-                        // mm.markVisited({y, x});
+                    if(map.data[pixelcoordtoidx(y, x, map_width)] != 0 ){
                         continue;
                     }
                     for(const auto& dir : directions){
                         unsigned int nx = x + dir[0];
                         unsigned int ny = y + dir[1];
                         if(nx > 10 && ny > 10 && nx < map_width - 10 && ny < map_height - 10){
-                            if(map.data[pixelcoordtoidx(ny, nx, map_width)] >= 90 || mm.isVisited(ny, nx)){
+                            if(map.data[pixelcoordtoidx(ny, nx, map_width)] >= 90){
                                 frontier.push_back({y, x});
                                 break;
                             }
@@ -1309,7 +1308,7 @@ class Exploration_map : public rclcpp::Node
 
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
         std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-        std::shared_ptr<ObstacleAvoider> obstacle_avoider_;
+        // std::shared_ptr<ObstacleAvoider> obstacle_avoider_;
 
 
         nav_msgs::msg::OccupancyGrid map_;
