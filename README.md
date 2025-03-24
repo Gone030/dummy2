@@ -7,7 +7,7 @@ __Dummy2__ 는 Car-like 로봇을 Garzebo에 구현해 Nav2 패키지를 통한 
 
 현재까지 이 프로젝트의 목표는 노드의 실행만으로 Occupancy Grid Map 의 데이터를 활용해 조건에 부합하는 목표를 설정 후 이동하며 SLAM을 통한 지도 작성을 완수해내는 것 입니다.  
 
-
+(수정예정)
 [3배속 재생입니다.](https://github.com/user-attachments/assets/9495880b-95de-4f5e-b62c-b21c66504839)
 
 
