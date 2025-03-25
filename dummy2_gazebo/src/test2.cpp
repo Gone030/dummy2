@@ -36,6 +36,11 @@ class MapManager{
 
         std::map<P, bool> visited_;
         std::set<P> singleton_set_;
+        unsigned int min_x_ = std::numeric_limits<unsigned int>::max();
+        unsigned int min_y_ = std::numeric_limits<unsigned int>::max();
+        unsigned int max_x_ = 0;
+        unsigned int max_y_ = 0;
+        std::tuple<unsigned int*, unsigned int*, unsigned int*, unsigned int*> wall_ = {&min_y_, &min_x_, &max_y_, &max_x_};
         MapManager() {}
 
     public:
@@ -43,6 +48,21 @@ class MapManager{
             static MapManager instance;
             return instance;
         }
+
+        void updateWall(unsigned int min_y, unsigned int min_x, unsigned int max_y, unsigned int max_x){
+
+            min_y_ = std::min(min_y_, min_y);
+            min_x_ = std::min(min_x_, min_x);
+            max_y_ = std::max(max_y_, max_y);
+            max_x_ = std::max(max_x_, max_x);
+        }
+
+        std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> getWall(){
+            std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> wall = {min_y_, min_x_, max_y_, max_x_};
+            return wall;
+        }
+
+
 
         bool isVisited(unsigned int y, unsigned int x){
             if(visited_.find({y, x}) == visited_.end()){
@@ -140,6 +160,7 @@ class PoseManager{
 
             return theta;
         }
+
         bool isitstuckhere(const geometry_msgs::msg::PoseStamped& pose){
             if (last_pose_.pose.position.x - pose.pose.position.x < 0.1 &&
                 last_pose_.pose.position.y - pose.pose.position.y < 0.1)
@@ -156,15 +177,10 @@ class PoseManager{
             double goal_x = goal_pose_.pose.position.x;
             double goal_y = goal_pose_.pose.position.y;
 
-            double theta = getRobotdirection();
-
             double dx = goal_x - robot_x;
             double dy = goal_y - robot_y;
 
-            double rotate_x = cos(-theta) * dx - sin(-theta) * dy;
-            double rotate_y = sin(-theta) * dx + cos(-theta) * dy;
-
-            return atan2(rotate_y, rotate_x);
+            return atan2(dy, dx);
         }
 
         double getdistancewithRobotGoal(){
@@ -218,24 +234,23 @@ class Utility{
         static unsigned int pixelcoordtoidx(unsigned int y, unsigned int x, uint32_t width){
             return (y * width + x);
         }
-};
+
+        static bool isSameTuple(std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> a,
+                                 std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> b){
+            int threshold = 5;
+            if( std::abs((int)std::get<0>(a) - (int)std::get<0>(b)) > threshold ||
+                std::abs((int)std::get<1>(a) - (int)std::get<1>(b)) > threshold ||
+                std::abs((int)std::get<2>(a) - (int)std::get<2>(b)) > threshold ||
+                std::abs((int)std::get<3>(a) - (int)std::get<3>(b)) > threshold){
+                    return false;
+               }
+            return true;
+        }
+    };
 
 class SectorManager{
     public:
         SectorManager() {}
-
-        int sectorSize(){
-            return (int)sector_set.size();
-        }
-        void sectorClear(){
-            sector_set.clear();
-        }
-        std::set<int>& getSectorSet(){
-            return sector_set;
-        }
-        void sectorInsert(int sector){
-            sector_set.insert(sector);
-        }
 
         struct sector_border{
             int sector;
@@ -243,36 +258,21 @@ class SectorManager{
             P max_border;
         };
 
+        int getDesireSector(){
+            if(sector_queue.empty()) return 0;
+            return sector_queue.front();
+        }
 
-        bool sectorControl(int current_sector, bool reset, bool fix_sector){
-            int sector = current_sector;
-            if(reset){
-                last_sector = 0;
-                return false;
+        bool popSectorQueue(){
+            if(sector_queue.empty()) return false;
+            sector_queue.pop();
+            return true;
+        }
+
+        void pushSectorQueue(int sector_number[4]){
+            for(int i = 0; i < 4; i++){
+                sector_queue.push(sector_number[i]);
             }
-            if(fix_sector){
-                sector_set.clear();
-                if(last_sector != sector){
-                    // RCLCPP_INFO(this->get_logger(),"Not same sector");
-                    return true;
-                }else if(last_sector == sector){
-                    // RCLCPP_INFO(this->get_logger(),"Same sector");
-                    return false;
-                }
-            }else{
-                if(last_sector == 0){
-                    last_sector = sector;
-                    return false;
-                }
-                if(last_sector != sector){
-                    last_sector = sector;
-                    return false; // different sector
-                }else{
-                    std::cout<< "  sadfadsf  " << last_sector<< "asdfass" <<std::endl;
-                    return true; // same sector
-                }
-            }
-            return false;
         }
 
         sector_border checkSector(const nav_msgs::msg::OccupancyGrid& map, P pixel_coord){
@@ -321,321 +321,55 @@ class SectorManager{
         }
 
     private:
+        int desire_sector;
         int last_sector;
-        std::set<int> sector_set;
+        std::queue<int> sector_queue;
 };
 
 class FrontierExplorer{
     public:
-        FrontierExplorer(rclcpp::Node* node, MapManager& mm, PoseManager& pm)
-            : node_(node), mm_(mm), pm_(pm), sm_() {}
+        FrontierExplorer(rclcpp::Node* node)
+            : node_(node) {}
 
-            P setGoalBasedonFrontier(const nav_msgs::msg::OccupancyGrid& map, PoseManager& PM, bool fail_flag, bool expanded_flag){
-                const int directions[8][2] = {{-1, 0}, {1, 0}, {0, -1}, {0, -1}, {-1, -1}, {-1, 1}, {1, -1}, {1, 1}};
-                RCLCPP_INFO(node_->get_logger(),"set goal based on frontier");
-                unsigned int map_width = (unsigned int)map.info.width;
-                unsigned int map_height = (unsigned int)map.info.height;
-                geometry_msgs::msg::PoseStamped robot_pose = PM.getLastPose();
+        void setFrontier(const nav_msgs::msg::OccupancyGrid& map){
+            MapManager& mm = MapManager::getInstance();
+            unsigned int width = map.info.width;
 
-                if(sm_.sectorSize() == 4){
-                    RCLCPP_INFO(node_->get_logger(),"Sector reset");
-                    sm_.sectorControl(0, true, false);
-                    sm_.sectorClear();
-                    MapManager::getInstance().clearSingletonset();
-                    return {0, 0};
-                }
+            for(unsigned int idx = 0; idx < map.data.size(); idx++){
+                unsigned int temp_x = idx % width;
+                unsigned int temp_y = idx / width;
 
-                std::vector<P> frontier;
-
-                for(unsigned int x = 0; x < map_width; x++){
-                    for(unsigned int y = 0; y < map_height; y++){
-                        if(map.data[Utility::pixelcoordtoidx(y, x, map_width)] != 0 ){
-                            continue;
-                        }
-                        for(const auto& dir : directions){
-                            unsigned int nx = x + dir[0];
-                            unsigned int ny = y + dir[1];
-                            if(nx > 10 && ny > 10 && nx < map_width - 10 && ny < map_height - 10){
-                                if(map.data[Utility::pixelcoordtoidx(ny, nx, map_width)] >= 90){
-                                    frontier.push_back({y, x});
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                }
-                if(frontier.empty()){
-                    RCLCPP_INFO(node_->get_logger(),"frontier empty");
-                    return {0, 0} ;
-                }
-                else{
-                    int size = (int)frontier.size();
-                    RCLCPP_INFO(node_->get_logger(),"frontier size : %d", size);
-                    P goal;
-
-                    unsigned int pixel_y = (robot_pose.pose.position.y - map.info.origin.position.y) / map.info.resolution;
-                    unsigned int pixel_x = (robot_pose.pose.position.x - map.info.origin.position.x) / map.info.resolution;
-                    sort(frontier.begin(), frontier.end(), [&](const P& a, const P& b){
-                        if (Utility::distance(a, {pixel_y, pixel_x}) == Utility::distance(b, {pixel_y, pixel_x})) {
-                            if (a.second == b.second) {
-                                return a.first < b.first;
-                            }
-                            return a.second < b.second;
-                        }
-                        return Utility::distance(a, {pixel_y, pixel_x}) > Utility::distance(b, {pixel_y, pixel_x});
-                    });
-                    double min_dist = 100.0; //temp
-
-                    static bool last_expanded = false;
-                    SectorManager::sector_border sector;
-                    if(fail_flag){
-                        expanded_flag = last_expanded;
-                    }
-                    for(int idx = 0; idx < size; idx++){
-                        goal = frontier[idx];
-                        if(idx == size - 1){
-                            goal = frontier[0];
-                            RCLCPP_INFO(node_->get_logger(),"All goal is gear");
-                            break;
-                        }
-                        double dist = Utility::distance(goal, {pixel_y, pixel_x});
-                        if(dist > min_dist){
-                            if(MapManager::getInstance().getSingletonset().count(goal) == 1){
-                                continue;
-                            }
-                            sector = sm_.checkSector(map, goal);
-
-                            if(expanded_flag){
-                                if(sm_.sectorControl(sector.sector, false, true)){
-                                    continue;
-                                }
-                            }else{
-                                if(sm_.getSectorSet().find(sector.sector) != sm_.getSectorSet().end()){
-                                    continue;
-                                }
-                                if(sm_.sectorControl(sector.sector, false, false)){
-                                    continue;
-                                }
-                            }
-                            RCLCPP_INFO(node_->get_logger(),"expanded_flag : %d", expanded_flag);
-                            RCLCPP_INFO(node_->get_logger(),"sector : %d", sector.sector);
-                            // RCLCPP_INFO(node_->get_logger(),"index : %d , size : %d", idx, size);
-                            RCLCPP_INFO(node_->get_logger(),"Goal : (%d, %d)", goal.first, goal.second);
-                            RCLCPP_INFO(node_->get_logger(),"dist : %f", dist);
-                            break;
-                        }
-                    }
-                    MapManager::getInstance().addOSingletonset(goal.first, goal.second);
-
-                    {
-                        auto offset = findNearGear(map, goal);
-
-                        if(offset.first == 0 || offset.second == 0){
-                            if(offset.first == 0){
-                                goal.first += 10;
-                                if(offset.second != 0){
-                                    goal.second += (-offset.second) / offset.second * 20;
-                                }
-                            }
-                            if(offset.second == 0){
-                                goal.second += 10;
-                                if(offset.first != 0){
-                                    goal.first += (-offset.first) / offset.first * 20;
-                                }
-                            }
-                        }else{
-                            goal.first += (-offset.first) / offset.first * 30;
-                            goal.second += (-offset.second) / offset.second * 30;
-                        }
-                    }
-                    int border_offset = 15;
-                    goal.first = std::clamp(goal.first, sector.min_border.first + border_offset, sector.max_border.first - border_offset);
-                    goal.second = std::clamp(goal.second, sector.min_border.second + border_offset, sector.max_border.second - border_offset);
-
-                    last_expanded = expanded_flag;
-
-                    RCLCPP_INFO(node_->get_logger(),"Fix Goal : (%d, %d)", goal.first, goal.second);
-                    RCLCPP_INFO(node_->get_logger(),"frontier end");
-                    sm_.sectorInsert(sector.sector);
-
-                    for(auto i : sm_.getSectorSet()){
-                        RCLCPP_INFO(node_->get_logger(),"sector_set : %d", i);
-                    }
-                    return goal;
-                }
+                mm.updateWall(temp_y, temp_x, temp_y, temp_x);
             }
+        }
+
+        P mapExpandingSequence(int sector){
+            MapManager& mm = MapManager::getInstance();
+            auto min_max = mm.getWall();
+            unsigned int min_y = std::get<0>(min_max);
+            unsigned int min_x = std::get<1>(min_max);
+            unsigned int max_y = std::get<2>(min_max);
+            unsigned int max_x = std::get<3>(min_max);
+
+            unsigned int frontier_goal[4][2] = {{max_y, max_x}, {max_y, min_x}, {min_y, min_x}, {min_y, max_x}};
+
+            P current_desire_goal = {frontier_goal[sector - 1][0], frontier_goal[sector - 1][1]};
+            P fixed_goal = findSafeGoal(current_desire_goal, sector);
+            return fixed_goal;
+        }
+
+        P findSafeGoal(P coord, int sector){
+            int offset_points = 20;
+            int offset[4][2] = {{-offset_points, -offset_points}, {-offset_points, offset_points},
+                                {offset_points, offset_points}, {offset_points, -offset_points}};
+
+            P fixed_goal = {coord.first + offset[sector - 1][0], coord.second + offset[sector - 1][1]};
+            return fixed_goal;
+        }
 
     private:
         rclcpp::Node* node_;
-        MapManager& mm_;
-        PoseManager& pm_;
-        SectorManager sm_;
-
-        std::pair<int, int> findNearGear(const nav_msgs::msg::OccupancyGrid map, const P& goal){
-            unsigned int map_width = (unsigned int)map.info.width;
-            unsigned int map_height = (unsigned int)map.info.height;
-            for(int dy = -10; dy <= 10; dy++){
-                for(int dx = -10; dx <= 10; dx++){
-                    unsigned int check_y = goal.first + dy;
-                    unsigned int check_x = goal.second + dx;
-                    if(check_y < map_height && check_x < map_width &&
-                        map.data[Utility::pixelcoordtoidx(check_y, check_x, map_width)] == 100){
-                        return {dy, dx};
-                    }
-                }
-            }
-            return {0, 0};
-        }
 };
-/*
-class ObstacleAvoider {
-    public:
-    ObstacleAvoider(rclcpp::Node* node) : node_(node) {
-            cmd_pub_ = node_->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
-        }
-
-        bool checkSurroundingsAndEvacuate(const nav_msgs::msg::OccupancyGrid& map) {
-            PoseManager& PM = PoseManager::getInstance();
-            LaserManager& LM = LaserManager::getInstance();
-            bool done = false;
-
-            auto heading = findSafeHeading(map, PM, LM);
-            if(checkSurrounding(0.5)){
-                done = evacuate(heading);
-            // }else{
-            //     done = goAnotherway(map);
-            }
-            return done;
-        }
-
-    private:
-
-        bool checkSurrounding(double threshold){
-            sensor_msgs::msg::LaserScan laser_msg = LaserManager::getInstance().getLaserMsg();
-            for(size_t i = 0; i < laser_msg.ranges.size(); i++){
-                if(laser_msg.ranges[i] < threshold){
-                    return true;
-                }
-            }
-            return false;
-        }
-
-
-        std::pair<double, double> findSafeHeading(const nav_msgs::msg::OccupancyGrid& map,
-                               PoseManager& PM,
-                               LaserManager& LM){
-
-            double theta = PM.getRobotdirection();
-            int digree = theta * 180 * M_1_PI;
-
-            double last_max_range = std::numeric_limits<double>::min();
-            double last_min_range = std::numeric_limits<double>::max();
-            int max_range_index = std::numeric_limits<int>::min();
-            int min_range_index = std::numeric_limits<int>::max();
-
-            for(int index = 0; index < (int)LM.getLaserMsg().ranges.size(); index++){
-                double range = LM.getLaserMsg().ranges[index];
-                if(range > last_max_range){
-                    last_max_range = range;
-                    max_range_index = index;
-                }
-                if(range < last_min_range){
-                    last_min_range = range;
-                    min_range_index = index;
-                }
-            }
-            int max_range_dir = (max_range_index + 180) % 360;
-            if(max_range_dir > 180){
-                max_range_dir -= 360;
-            }
-            int min_range_dir = (min_range_index + 180) % 360;
-            if(min_range_dir > 180){
-                min_range_dir -= 360;
-            }
-
-
-
-
-            double best_heading = max_range_dir * M_PI / 180;
-            double obstacle_heading = min_range_dir * M_PI / 180;
-            // RCLCPP_INFO(node_->get_logger(), "robot heading : %d (digree), %f (radian)", digree, theta);
-            // RCLCPP_INFO(node_->get_logger(), "최소 측정 거리 방향: %d (digree), %f (radian)", min_range_dir, obstacle_heading);
-            // RCLCPP_INFO(node_->get_logger(), "권장 회피기동 방향: %d (digree), %f (radian) ", max_range_dir, best_heading );
-
-            return {best_heading, obstacle_heading};
-        }
-
-        bool evacuate(std::pair<double, double> heading) {
-            RCLCPP_INFO(node_->get_logger(), "장애물 피하기 시작");
-            geometry_msgs::msg::Twist cmd_vel;
-            double best_heading = heading.first;
-            double obstacle_heading = heading.second;
-            double robot_heading = PoseManager::getInstance().getRobotdirection();
-            bool done = false;
-            rclcpp::Rate loop_rate(10); // 10Hz
-
-            if(obstacle_heading < tf2Radians(60) && obstacle_heading > tf2Radians(-60)){
-                RCLCPP_INFO(node_->get_logger(), "장애물이 정면에 있습니다.");
-                cmd_vel.linear.x = -0.2;
-                cmd_vel.angular.z = 0.0;
-            }
-            else if(obstacle_heading < tf2Radians(120) && obstacle_heading > tf2Radians(60))
-                RCLCPP_INFO(node_->get_logger(), "장애물이 왼쪽에 있습니다."); // 미구현
-            else if(obstacle_heading > tf2Radians(-120) && obstacle_heading < tf2Radians(-60))
-                RCLCPP_INFO(node_->get_logger(), "장애물이 오른쪽에 있습니다."); // 미구현
-            else if(obstacle_heading > tf2Radians(120) || obstacle_heading < tf2Radians(-120)){
-                RCLCPP_INFO(node_->get_logger(), "장애물이 뒤에 있습니다.");
-                cmd_vel.linear.x = 0.2;
-                cmd_vel.angular.z = 0.0;
-            }
-            geometry_msgs::msg::PoseStamped initial_pose = PoseManager::getInstance().getLastPose();
-            geometry_msgs::msg::PoseStamped initial_pose_copy = initial_pose;
-
-            while(rclcpp::ok() && !done){
-                cmd_pub_->publish(cmd_vel);
-                rclcpp::sleep_for(std::chrono::milliseconds(100));
-
-                geometry_msgs::msg::PoseStamped current_pose = PoseManager::getInstance().getLastPose();
-                double distance = sqrt(pow(current_pose.pose.position.x - initial_pose_copy.pose.position.x, 2) +
-                                       pow(current_pose.pose.position.y - initial_pose_copy.pose.position.y, 2));
-                RCLCPP_INFO(node_->get_logger(), "distance : %f", distance);
-                if(!checkSurrounding(0.5) && distance > 0.5){
-                    done = true;
-                    RCLCPP_INFO(node_->get_logger(), "장애물 회피 성공");
-                }
-                loop_rate.sleep();
-            }
-
-            RCLCPP_INFO(node_->get_logger(), "장애물 회피 성공");
-            cmd_vel.linear.x = 0.0;
-            cmd_vel.angular.z = 0.0;
-            cmd_pub_->publish(cmd_vel);
-            // 방향이 반대면 후진
-            // 방향이 일치할때까지 조향
-            // 끼임상태 탈출 할 때 까지 기동
-
-            return done;
-        }
-
-        bool goAnotherway(const nav_msgs::msg::OccupancyGrid& map){ // 끼이진 않았는데 경로찾기가 실패했을 경우 다른 위치에서 경로찾기 위함
-            // 마지막 설정 목표에 도달하기 위해 주변 장애물을 피해 다른 경로로 이동이 목표
-
-            geometry_msgs::msg::Twist cmd_vel;
-            PoseManager& PM = PoseManager::getInstance();
-
-            double goal_heading = PM.getDirectionWithRobotGoal(0.0, 0.0);
-            double robot_heading = PM.getRobotdirection();
-            double goal_distance = PM.getdistancewithRobotGoal();
-            bool done = false;
-
-            auto safe_heading = findSafeHeading(map, PM, LaserManager::getInstance());
-
-        }
-
-        rclcpp::Node::SharedPtr node_;
-        rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_pub_;
-    };
-*/
 
 class NotSearchedFirstExplorer{
     public:
@@ -728,40 +462,42 @@ class Exploration_map : public rclcpp::Node
             best_heading_dir_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("safe_way", 10);
             laser_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("laser_line", 10);
             goal_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("goal_points", 10);
-            // obstacle_avoider_ = std::make_shared<ObstacleAvoider>(this);
-            frontier_explorer_ = std::make_shared<FrontierExplorer>(this, MapManager::getInstance(), PoseManager::getInstance());
+            frontier_explorer_ = std::make_shared<FrontierExplorer>(this);
             not_searched_first_explorer_ = std::make_shared<NotSearchedFirstExplorer>(this);
             timer_ = this->create_wall_timer(std::chrono::seconds(1), std::bind(&Exploration_map::timer_callback, this));
 
+            sector_manager_ = std::make_shared<SectorManager>();
+
+            int sector_number[4] = {3, 2, 4, 1};
+            sector_manager_->pushSectorQueue(sector_number);
         }
 
     protected:
 
         void timer_callback(){
             // RCLCPP_INFO(this->get_logger(),"System status : map = %d , pose = %d, jobdone = %d", i_sub_map, i_sub_pose, jobdone);
-            if(explore && map_data_stable && searching && !force_move){
+            if(first_move && explore){
+                RCLCPP_INFO(this->get_logger(), "First move");
                 explore = false;
-                searching = false;
-                P goal;
-
-                if(expand_map_sq){
-                    goal = frontier_explorer_->setGoalBasedonFrontier(map_, PoseManager::getInstance(), fail_flag, expanded);
-                    if(goal.first == 0 && goal.second == 0) expand_map_sq = false;
-                    expanded = false;
-                    fail_flag = false;
+                firstMove();
+            }else if(!first_move && explore && searching && !force_move){
+                RCLCPP_INFO(this->get_logger(), "Explore");
+                if(!expanded && !fail_flag){
+                    sector_manager_->popSectorQueue();
                 }
-                else{
-                    goal = not_searched_first_explorer_->setGoal(map_);
-                    if(goal == P{0, 0}){
-                        RCLCPP_INFO(this->get_logger(), "All point visited");
-                        end_explore = true;
-                    }
-                    current_pixel_goal = goal;
+                int sector = sector_manager_->getDesireSector();
+                RCLCPP_INFO(this->get_logger(), "Sector : %d", sector);
+                if(sector == 0){
+                    force_move = true;
+                    return;
                 }
-                if(!end_explore){
-                    pubGoal(goal, map_);
-                }
+                P goal = frontier_explorer_->mapExpandingSequence(sector);
+                pubGoal(goal, map_);
+                explore = false;
+                expanded = false;
+                fail_flag = false;
             }
+
             if(!expand_map_sq && map_data_stable)
                 excludeObstacle(map_);
         }
@@ -779,22 +515,13 @@ class Exploration_map : public rclcpp::Node
                     }
                     fail_flag = true;
 
-                    rclcpp::Time fail_time = this->now();
-                    if(fail_time.seconds() - pub_time.seconds() < 1 ){
-                        force_move_count++;
-                    }else{
-                        force_move_count = 0;
-                    }
-                    if(force_move_count == force_move_threshold){
-                        RCLCPP_WARN(this->get_logger(), "Force move");
-                        // force_move = true;
-                        // explore = false;
-                    }
                     MapManager::getInstance().setVisited(current_pixel_goal, true);
                 }
                 else if(node_name_ == "FollowPath" && current_status_ == "SUCCESS"){
                     RCLCPP_INFO(this->get_logger(), "SUCCEED to move.");
                     fail_count = 0;
+                    if(first_move) first_move = false;
+                    fail_flag = false;
                 }
                 else if(node_name_ == "FollowPath" && current_status_ == "RUNNING"){
 
@@ -805,7 +532,19 @@ class Exploration_map : public rclcpp::Node
                 }
                 if(node_name_ == "RateController" && current_status_ == "IDLE"){
                     RCLCPP_INFO(this->get_logger(), "READY 2 MOVE");
+                    auto wall = MapManager::getInstance().getWall();
+                    static std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> last_wall;
+                    if(!Utility::isSameTuple(last_wall, wall)){
+                        last_wall = wall;
+                        RCLCPP_INFO(this->get_logger(),"Map Expanded");
+                        expanded = true;
+                    }
+                    else{
+                        expanded = false;
+                    }
+                    RCLCPP_INFO(this->get_logger(),"min_x = %d, min_y = %d, max_x = %d, max_y = %d", std::get<1>(wall), std::get<0>(wall), std::get<3>(wall), std::get<2>(wall));
 
+                    /*
                     if(!expand_map_sq){
                         MapManager::getInstance().setVisited(current_pixel_goal, true);
                     }
@@ -813,7 +552,7 @@ class Exploration_map : public rclcpp::Node
                         fail_count = 0;
                     }
                     clearAround(map_, MapManager::getInstance(), PoseManager::getInstance());
-
+                    */
                     explore = force_move ? false : true;
                 }
             }
@@ -824,20 +563,16 @@ class Exploration_map : public rclcpp::Node
         }
 
         void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg){
+            searching = false;
             if(msg->data.empty()){
                 RCLCPP_WARN(this->get_logger(), "Empty map");
                 return;
             }
+            frontier_explorer_->setFrontier(map_);
 
             map_ = *msg;
-            if (expand_map_sq && isMapExpanding(map_)){
-                RCLCPP_WARN(this->get_logger(), "지도 확장");
-                transformCoord(map_);  // 지도 확장 시에만
-                expanded = true;
-            }
 
-
-            search(map_); // map.data 에 따른 미탐색구역 visited 맵으로 동기화
+            // search(map_); // map.data 에 따른 미탐색구역 visited 맵으로 동기화
 
             searching = true;
         }
@@ -846,15 +581,33 @@ class Exploration_map : public rclcpp::Node
 
             PoseManager::getInstance().setLastPose(*msg);
 
-            // if(force_move){
-            //     force_move = !obstacle_avoider_->checkSurroundingsAndEvacuate(map_);
-            // }
             if(!expand_map_sq){
                 publishVisitedPoints(map_); // visited 맵 시각화
             }
         }
 
+        void firstMove(){
+            geometry_msgs::msg::PoseStamped robot_pose = PoseManager::getInstance().getLastPose();
 
+            geometry_msgs::msg::PoseStamped goal_pose_first;
+            goal_pose_first.header.frame_id = "map";
+            goal_pose_first.header.stamp = this->now();
+
+
+            double robot_direction = PoseManager::getInstance().getRobotdirection();
+
+            tf2::Quaternion q;
+            q.setRPY(0, 0, robot_direction + M_PI);
+
+            goal_pose_first.pose.orientation = tf2::toMsg(q);
+            const double direction[4][2] = {{-2.5, 0}, {2.5, 0}, {0, -2.5}, {0, 2.5}};
+            static int count = 0;
+            goal_pose_first.pose.position.x = robot_pose.pose.position.x + direction[count][0];
+            goal_pose_first.pose.position.y = robot_pose.pose.position.y + direction[count][1];
+
+            goal_pub_->publish(goal_pose_first);
+            count++;
+        }
 
         bool isMapExpanding(const nav_msgs::msg::OccupancyGrid& map){
             static unsigned int last_width = map.info.width;
@@ -1163,7 +916,7 @@ class Exploration_map : public rclcpp::Node
                 base_link_origin.point.z = 0.0;
 
                 geometry_msgs::msg::PointStamped map_origin;
-                tf2::doTransform(base_link_origin, map_origin, transform);
+                tf2::doTransform(base_link_origin, map_origin, transform); // 로봇 좌표계 -> 지도 좌표계
 
                 laser_line.points.clear();
                 laser_line.points.push_back(map_origin.point);
@@ -1275,16 +1028,10 @@ class Exploration_map : public rclcpp::Node
         void isOverObstacle(const nav_msgs::msg::OccupancyGrid& map,
                              PoseManager& PM, LaserManager& LM, int fail_count){
 
-            double robot_x = PM.getLastPose().pose.position.x;
-            double robot_y = PM.getLastPose().pose.position.y;
-            double goal_x = PM.getGoalPose().pose.position.x;
-            double goal_y = PM.getGoalPose().pose.position.y;
-
-
-            double angle_to_goal = std::atan2(goal_y - robot_y, goal_x - robot_x);
+            double angle_to_goal = PM.getDirectionWithRobotGoal();
 
             double robot_theta = PM.getRobotdirection();
-            double relative_angle_to_goal = angle_to_goal - robot_theta;
+            double relative_angle_to_goal = angle_to_goal - robot_theta; // 로봇 좌표계 기준
 
             relative_angle_to_goal = std::fmod(relative_angle_to_goal + M_PI, 2 * M_PI) - M_PI;
 
@@ -1304,7 +1051,7 @@ class Exploration_map : public rclcpp::Node
             if (std::isinf(range_at_angle)){
                 RCLCPP_INFO(this->get_logger(), "No valid data at this angle.");
                 double angle_rad = index * M_PI / 180.0;
-                std::pair<double, double> another_goal = setGoal_Angleanddist(map, angle_rad, 5); // 10 = temp;
+                std::pair<double, double> another_goal = setGoal_Angleanddist(map, angle_rad, 10); // 10 = temp;
                 PM.getGoalPose().pose.position.x = another_goal.second;
                 PM.getGoalPose().pose.position.y = another_goal.first;
 
@@ -1423,18 +1170,17 @@ class Exploration_map : public rclcpp::Node
             RCLCPP_INFO(this->get_logger(), "초기 목표 : (x : %f, y : %f)", goal_msg.pose.position.x, goal_msg.pose.position.y);
 
             pm.setGoalPose(goal_msg);
-            if(!expand_map_sq){
+            if(!first_move){
                 isOverObstacle(map, pm, LaserManager::getInstance(), fail_count);
             }
-
             RCLCPP_INFO(this->get_logger(), "수정 목표 : (x : %f, y : %f)", pm.getGoalPose().pose.position.x, pm.getGoalPose().pose.position.y);
             publishGoalPoints(pm.getGoalPose());
 
             double goal_direction = pm.getDirectionWithRobotGoal();
+            goal_direction = std::fmod(goal_direction + M_PI, 2 * M_PI) - M_PI;
             tf2::Quaternion q;
             q.setRPY(0, 0, goal_direction);
             pm.getGoalPose().pose.orientation = tf2::toMsg(q);
-
             goal_pub_->publish(pm.getGoalPose());
             pub_time = this->now();
         }
@@ -1449,8 +1195,8 @@ class Exploration_map : public rclcpp::Node
 
         bool test = false;
         rclcpp::Time pub_time;
-        int temp_i = 0;
 
+        bool first_move = true;
         bool expanded = false;
         bool explore = true; // 동작 완료 후 활성 , 이동 없는 테스트는 비활성
         bool searching = false;
@@ -1464,9 +1210,9 @@ class Exploration_map : public rclcpp::Node
 
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
         std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
-        // std::shared_ptr<ObstacleAvoider> obstacle_avoider_;
         std::shared_ptr<FrontierExplorer> frontier_explorer_;
         std::shared_ptr<NotSearchedFirstExplorer> not_searched_first_explorer_;
+        std::shared_ptr<SectorManager> sector_manager_;
 
 
         nav_msgs::msg::OccupancyGrid map_;
