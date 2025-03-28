@@ -41,7 +41,7 @@ class MapManager{
         unsigned int max_x_ = 0;
         unsigned int max_y_ = 0;
         std::tuple<unsigned int*, unsigned int*, unsigned int*, unsigned int*> wall_ = {&min_y_, &min_x_, &max_y_, &max_x_};
-        MapManager() {}
+        MapManager(){}
 
     public:
         static MapManager& getInstance(){
@@ -131,8 +131,7 @@ class PoseManager{
         geometry_msgs::msg::PoseStamped last_pose_;
         std::mutex last_pose_mutex_;
         geometry_msgs::msg::PoseStamped goal_pose_;
-        P last_goal_pixel_coord_;
-        PoseManager() {}
+        PoseManager(){}
 
     public:
         static PoseManager& getInstance(){
@@ -162,7 +161,7 @@ class PoseManager{
         }
 
         bool isitstuckhere(const geometry_msgs::msg::PoseStamped& pose){
-            if (last_pose_.pose.position.x - pose.pose.position.x < 0.1 &&
+            if(last_pose_.pose.position.x - pose.pose.position.x < 0.1 &&
                 last_pose_.pose.position.y - pose.pose.position.y < 0.1)
             {
                 return true;
@@ -208,7 +207,7 @@ class LaserManager{
 
         sensor_msgs::msg::LaserScan laser_msg_;
         std::mutex laser_msg_mutex_;
-        LaserManager() {}
+        LaserManager(){}
     public:
         static LaserManager& getInstance(){
             static LaserManager instance;
@@ -248,88 +247,168 @@ class Utility{
         }
     };
 
-class SectorManager{
+class QuadtreeNode {
     public:
-        SectorManager() {}
+        QuadtreeNode(unsigned int min_y, unsigned int min_x, unsigned int max_y, unsigned int max_x)
+            : min_y_(min_y), min_x_(min_x), max_y_(max_y), max_x_(max_x){}
 
-        struct sector_border{
-            int sector;
-            P min_border;
-            P max_border;
-        };
+        double evalute(const nav_msgs::msg::OccupancyGrid& map){
+            double occupancy_rate = calculateOccupancyRate(map);
+            double unexplored_ratio = calculateUnexploredRatio(map);
+            double distance = calculateDisance(map, PoseManager::getInstance().getLastPose());
+            // double visited_ratio = calculateVisitedRatio();
 
-        int getDesireSector(){
-            if(sector_queue.empty()) return 0;
-            return sector_queue.front();
+            // double visited_penalty = 0.0;
+            // MapManager& mm = MapManager::getInstance();
+            // unsigned int mid_y = (min_y_ + max_y_) / 2;
+            // unsigned int mid_x = (min_x_ + max_x_) / 2;
+            // if(mm.isVisited(mid_y, mid_x)){
+            //     visited_penalty = 0.8;
+            // }
+
+            double score = unexplored_ratio * 0.7 + (1 - occupancy_rate) * 0.1 + distance * 0.2 ;// - visited_ratio * 0.1 - visited_penalty;
+
+            return score;
         }
+        bool merge(const nav_msgs::msg::OccupancyGrid& map){
+            if(children_[0] == nullptr) return false; // 자식노드가 없으면 합칠 수 없음
 
-        bool popSectorQueue(){
-            if(sector_queue.empty()) return false;
-            sector_queue.pop();
+            for(int i = 0; i < 4; i++){ // 자식노드가 모두 leaf 노드가 아니면 합칠 수 없음
+                if(children_[i]->children(0) != nullptr) return false;
+            }
+
+            double unexplore_threshold = 0.1;
+            for(int i = 0; i < 4; i++){
+                if(children_[i]->calculateUnexploredRatio(map) > unexplore_threshold) return false;
+            }
+            for(int i = 0; i < 4; i++){
+                children_[i] = nullptr;
+            }
             return true;
         }
 
-        void pushSectorQueue(int sector_number[4]){
+        bool split(const nav_msgs::msg::OccupancyGrid& map){
+            double unexplore_rate = calculateUnexploredRatio(map);
+            // RCLCPP_INFO(rclcpp::get_logger("Exploration_map_Node"), "unexplore_rate : %f", unexplore_rate);
+            // RCLCPP_INFO(rclcpp::get_logger("Exploration_map_Node"), "max_x_ - min_x_: %d", max_x_ - min_x_);
+            // RCLCPP_INFO(rclcpp::get_logger("Exploration_map_Node"), "max_y_ - min_y_: %d", max_y_ - min_y_);
+            if(unexplore_rate > 0.1 && (max_x_ - min_x_ > 5) && (max_y_ - min_y_ > 5)){
+                unsigned int mid_y = (min_y_ + max_y_) / 2;
+                unsigned int mid_x = (min_x_ + max_x_) / 2;
+
+                children_[0] = std::make_shared<QuadtreeNode>(min_y_, min_x_, mid_y, mid_x);
+                children_[1] = std::make_shared<QuadtreeNode>(min_y_, mid_x, mid_y, max_x_);
+                children_[2] = std::make_shared<QuadtreeNode>(mid_y, min_x_, max_y_, mid_x);
+                children_[3] = std::make_shared<QuadtreeNode>(mid_y, mid_x, max_y_, max_x_);
+
+                for(int i = 0; i < 4; i++){
+                    children_[i]->split(map);
+                }
+                return true;
+            }else{
+                return merge(map);
+            }
+            return false;
+        }
+
+        double calculateOccupancyRate(const nav_msgs::msg::OccupancyGrid& map){
+            int occupied_count = 0;
+            int total_count = 0;
+            for(unsigned int y = min_y_; y < max_y_; y++){
+                for(unsigned int x = min_x_; x < max_x_; x++){
+                    unsigned int idx = Utility::pixelcoordtoidx(y, x, map.info.width);
+                    if(map.data[idx] == 100){
+                        occupied_count++;
+                    }
+                    total_count++;
+                }
+            }
+            return (double)occupied_count / total_count;
+        }
+
+        double calculateUnexploredRatio(const nav_msgs::msg::OccupancyGrid& map){
+            int unexplored_count = 0;
+            int total_count = 0;
+            for(unsigned int y = min_y_; y < max_y_; y++){
+                for(unsigned int x = min_x_; x < max_x_; x++){
+                    unsigned int idx = Utility::pixelcoordtoidx(y, x, map.info.width);
+                    if(map.data[idx] == -1){
+                        unexplored_count++;
+                    }
+                    total_count++;
+                }
+            }
+            return (double)unexplored_count / total_count;
+        }
+
+        double calculateDisance(const nav_msgs::msg::OccupancyGrid& map,
+                                const geometry_msgs::msg::PoseStamped& robot_pose){
+            double center_y = (min_y_ + max_y_) / 2.0 * map.info.resolution + map.info.origin.position.y;
+            double center_x = (min_x_ + max_x_) / 2.0 * map.info.resolution + map.info.origin.position.x;
+            double robot_y = robot_pose.pose.position.y;
+            double robot_x = robot_pose.pose.position.x;
+
+            return std::hypot(center_x - robot_x, center_y - robot_y);
+        }
+
+
+        void visualize(visualization_msgs::msg::MarkerArray& marker_array, int& id,
+                       const nav_msgs::msg::OccupancyGrid& map){
+
+            visualization_msgs::msg::Marker marker;
+            marker.header.frame_id = "map";
+            marker.header.stamp = rclcpp::Clock().now();
+            marker.ns = "sector_lines";
+            marker.id = id++;
+            marker.type = visualization_msgs::msg::Marker::LINE_LIST;
+            marker.action = visualization_msgs::msg::Marker::ADD;
+            marker.scale.x = 0.05;
+            marker.color.a = 1.0;
+            marker.color.b = 1.0;
+
+            double min_x = map.info.origin.position.x + min_x_ * map.info.resolution;
+            double min_y = map.info.origin.position.y + min_y_ * map.info.resolution;
+            double max_x = map.info.origin.position.x + max_x_ * map.info.resolution;
+            double max_y = map.info.origin.position.y + max_y_ * map.info.resolution;
+
+            geometry_msgs::msg::Point p1, p2, p3, p4;
+            p1.x = min_x; p1.y = min_y; p1.z = 0.0;
+            p2.x = min_x; p2.y = max_y; p2.z = 0.0;
+            p3.x = max_x; p3.y = max_y; p3.z = 0.0;
+            p4.x = max_x; p4.y = min_y; p4.z = 0.0;
+
+            marker.points.push_back(p1); marker.points.push_back(p2);
+            marker.points.push_back(p2); marker.points.push_back(p3);
+            marker.points.push_back(p3); marker.points.push_back(p4);
+            marker.points.push_back(p4); marker.points.push_back(p1);
+            marker_array.markers.push_back(marker);
+
             for(int i = 0; i < 4; i++){
-                sector_queue.push(sector_number[i]);
+                if(children_[i] != nullptr){
+                    children_[i]->visualize(marker_array, id, map);
+                }
             }
         }
 
-        sector_border checkSector(const nav_msgs::msg::OccupancyGrid& map, P pixel_coord){
-            double origin_x = map.info.origin.position.x;
-            double origin_y = map.info.origin.position.y;
-            double resolution = map.info.resolution;
-            int sector = 0;
+        unsigned int min_y() const { return min_y_; }
+        unsigned int min_x() const { return min_x_; }
+        unsigned int max_y() const { return max_y_; }
+        unsigned int max_x() const { return max_x_; }
 
-
-            unsigned int std_pixel_x = -origin_x / resolution;
-            unsigned int std_pixel_y = -origin_y / resolution;
-            P std_pixel = {std_pixel_y, std_pixel_x};
-            // RCLCPP_INFO(this->get_logger(), "std_pixel : (%d, %d)", std_pixel.first, std_pixel.second);
-            std::pair<int, int> temp;
-            temp = {pixel_coord.second - std_pixel.second, pixel_coord.first - std_pixel.first};
-
-            if(temp.first == 0) temp.first = 1;
-            if(temp.second == 0) temp.second = 1;
-
-            if(temp.first > 0 && temp.second > 0){
-                sector = 1;
-                P min_border = std_pixel;
-                P max_border = {map.info.height, map.info.width};
-                return {sector, min_border, max_border};
-            }
-            else if(temp.first < 0 && temp.second > 0){
-                sector = 2;
-                P min_border = {std_pixel_y, 0};
-                P max_border = {map.info.height, std_pixel_x};
-                return {sector, min_border, max_border};
-            }
-            else if(temp.first < 0 && temp.second < 0){
-                sector = 3;
-                P min_border = {0, 0};
-                P max_border = std_pixel;
-                return {sector, min_border, max_border};
-            }
-            else if(temp.first > 0 && temp.second < 0){
-                sector = 4;
-                P min_border = {0, std_pixel_x};
-                P max_border = {std_pixel_y, map.info.width};
-                return {sector, min_border, max_border};
-            }
-            return {0, {0, 0}, {0, 0}};
-            // RCLCPP_WARN(this->get_logger(), "Sector : %d", sector);
-        }
+        std::shared_ptr<QuadtreeNode> children(int i) const { return children_[i]; }
 
     private:
-        int desire_sector;
-        int last_sector;
-        std::queue<int> sector_queue;
+        unsigned int min_y_;
+        unsigned int min_x_;
+        unsigned int max_y_;
+        unsigned int max_x_;
+        std::shared_ptr<QuadtreeNode> children_[4];
 };
 
 class FrontierExplorer{
     public:
         FrontierExplorer(rclcpp::Node* node)
-            : node_(node) {}
+            : node_(node){}
 
         void setFrontier(const nav_msgs::msg::OccupancyGrid& map){
             MapManager& mm = MapManager::getInstance();
@@ -340,6 +419,26 @@ class FrontierExplorer{
                 unsigned int temp_y = idx / width;
 
                 mm.updateWall(temp_y, temp_x, temp_y, temp_x);
+            }
+        }
+
+        int getDesireCorner(){
+            if(corner_queue.empty()) return 0;
+            return corner_queue.front();
+        }
+
+        bool getQueueEmpty(){
+            return corner_queue.empty();
+        }
+        bool popCornerQueue(){
+            if(corner_queue.empty()) return false;
+            corner_queue.pop();
+            return true;
+        }
+
+        void pushCornerQueue(int sector_number[4]){
+            for(int i = 0; i < 4; i++){
+                corner_queue.push(sector_number[i]);
             }
         }
 
@@ -369,12 +468,13 @@ class FrontierExplorer{
 
     private:
         rclcpp::Node* node_;
+        std::queue<int> corner_queue;
 };
 
 class NotSearchedFirstExplorer{
     public:
         NotSearchedFirstExplorer(rclcpp::Node* node)
-            : node_(node) {}
+            : node_(node){}
 
         P setGoal(const nav_msgs::msg::OccupancyGrid& map){
             MapManager& mm = MapManager::getInstance();
@@ -386,14 +486,16 @@ class NotSearchedFirstExplorer{
             unsigned int pixel_y = (robot_pose.pose.position.y - map.info.origin.position.y) / map.info.resolution;
             unsigned int pixel_x = (robot_pose.pose.position.x - map.info.origin.position.x) / map.info.resolution;
             P current_pixel_coord = {pixel_y, pixel_x};
+            unsigned int max_y = std::get<2>(mm.getWall());
+            unsigned int max_x = std::get<3>(mm.getWall());
 
             double min_dist = std::numeric_limits<double>::max();
             for(auto &itr : mm.getVisited()){
-                if(itr.second == false) {
+                if(itr.second == false){
                     // RCLCPP_INFO(this->get_logger(),"setgoal2");
-                    if(itr.first.first >= map.info.height || itr.first.second >= map.info.width){ continue; }
+                    if(itr.first.first >= max_y || itr.first.second >= max_x){ continue; }
                     unsigned int temp_idx = Utility::pixelcoordtoidx(itr.first.first, itr.first.second, map.info.width);
-                    if (temp_idx >= map.data.size()) {
+                    if(temp_idx >= map.data.size()){
                         // RCLCPP_ERROR(node_->get_logger(), "Invalid index: %u (map size: %zu)", temp_idx, map.data.size());
                         // RCLCPP_WARN(node_->get_logger(), "P Coord x : %d, y : %d, width : %d", itr.first.second, itr.first.first, map.info.width);
                         itr.second = true;
@@ -459,17 +561,15 @@ class Exploration_map : public rclcpp::Node
 
 
             visit_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("visited_points", 10);
-            best_heading_dir_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("safe_way", 10);
+            sector_marker_pub_ = this->create_publisher<visualization_msgs::msg::MarkerArray>("Sector_lines", 10);
             laser_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("laser_line", 10);
             goal_marker_pub_ = this->create_publisher<visualization_msgs::msg::Marker>("goal_points", 10);
             frontier_explorer_ = std::make_shared<FrontierExplorer>(this);
-            not_searched_first_explorer_ = std::make_shared<NotSearchedFirstExplorer>(this);
+            // not_searched_first_explorer_ = std::make_shared<NotSearchedFirstExplorer>(this);
             timer_ = this->create_wall_timer(std::chrono::seconds(1), std::bind(&Exploration_map::timer_callback, this));
 
-            sector_manager_ = std::make_shared<SectorManager>();
-
-            int sector_number[4] = {3, 2, 4, 1};
-            sector_manager_->pushSectorQueue(sector_number);
+            int corner_number[4] = {3, 2, 4, 1};
+            frontier_explorer_->pushCornerQueue(corner_number);
         }
 
     protected:
@@ -480,26 +580,29 @@ class Exploration_map : public rclcpp::Node
                 RCLCPP_INFO(this->get_logger(), "First move");
                 explore = false;
                 firstMove();
-            }else if(!first_move && explore && searching && !force_move){
-                RCLCPP_INFO(this->get_logger(), "Explore");
-                if(!expanded && !fail_flag){
-                    sector_manager_->popSectorQueue();
+            }else if(!first_move && explore && !force_move){
+                if(expand_map_sq){
+                    int sector = frontier_explorer_->getDesireCorner();
+                    RCLCPP_INFO(this->get_logger(), "Explore Corner : %d", sector);
+
+                    current_pixel_goal = frontier_explorer_->mapExpandingSequence(sector);
+                }else{
+                    // current_pixel_goal = not_searched_first_explorer_->setGoal(map_);
+                    if(root_ != nullptr){
+                        std::shared_ptr<QuadtreeNode> best_node = bestChild(root_, map_);
+                        RCLCPP_INFO(this->get_logger(), "find new goal");
+
+                        unsigned int goal_x = (best_node->min_x() + best_node->max_x()) / 2;
+                        unsigned int goal_y = (best_node->min_y() + best_node->max_y()) / 2;
+
+                        current_pixel_goal = {goal_y, goal_x};
+                    }
                 }
-                int sector = sector_manager_->getDesireSector();
-                RCLCPP_INFO(this->get_logger(), "Sector : %d", sector);
-                if(sector == 0){
-                    force_move = true;
-                    return;
-                }
-                P goal = frontier_explorer_->mapExpandingSequence(sector);
-                pubGoal(goal, map_);
+                RCLCPP_INFO(this->get_logger(), "pixel goal : %d, %d", current_pixel_goal.second, current_pixel_goal.first);
+                pubGoal(current_pixel_goal, map_);
                 explore = false;
                 expanded = false;
-                fail_flag = false;
             }
-
-            if(!expand_map_sq && map_data_stable)
-                excludeObstacle(map_);
         }
 
         void btl_callback(const nav2_msgs::msg::BehaviorTreeLog::SharedPtr msg){
@@ -509,29 +612,34 @@ class Exploration_map : public rclcpp::Node
                 std::string previous_status_ = msg->event_log[i].previous_status;
                 fail_count = std::clamp(fail_count, 0, 20);
                 if(node_name_ == "ComputePathToPose" && current_status_ == "FAILURE"){
-                    RCLCPP_WARN(this->get_logger(), "Failed to compute pose. Failcount : %d", fail_count);
+                    RCLCPP_WARN(this->get_logger(), "@@@@@@@@@@@@@@ Failed to compute pose. Failcount : %d @@@@@@@@@@@@@@", fail_count);
                     if(!expand_map_sq){
                         fail_count++;
+                        // MapManager::getInstance().setVisited(current_pixel_goal, true);
                     }
                     fail_flag = true;
-
-                    MapManager::getInstance().setVisited(current_pixel_goal, true);
                 }
                 else if(node_name_ == "FollowPath" && current_status_ == "SUCCESS"){
                     RCLCPP_INFO(this->get_logger(), "SUCCEED to move.");
                     fail_count = 0;
                     if(first_move) first_move = false;
                     fail_flag = false;
-                }
-                else if(node_name_ == "FollowPath" && current_status_ == "RUNNING"){
 
+                    if(split_route && expand_map_sq){
+                        RCLCPP_INFO(this->get_logger(), "Split");
+                        pubGoal(current_pixel_goal, map_);
+                        split_route = true;
+                    }
                 }
+                // else if(node_name_ == "FollowPath" && current_status_ == "RUNNING"){
+                // }
                 else if(node_name_ == "FollowPath" && current_status_ == "FAILURE" && previous_status_ == "RUNNING"){
-                    RCLCPP_WARN(this->get_logger(), "Failed to move.");
+                    RCLCPP_WARN(this->get_logger(), "@@@@@@@@@@@@@@ Failed to move. @@@@@@@@@@@@@@");
 
                 }
                 if(node_name_ == "RateController" && current_status_ == "IDLE"){
-                    RCLCPP_INFO(this->get_logger(), "READY 2 MOVE");
+                    RCLCPP_INFO(this->get_logger(), "@@@@@@@@@@@@@@ READY 2 MOVE @@@@@@@@@@@@@@");
+                    RCLCPP_INFO(this->get_logger(),"split : %d", split_route);
                     auto wall = MapManager::getInstance().getWall();
                     static std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> last_wall;
                     if(!Utility::isSameTuple(last_wall, wall)){
@@ -543,17 +651,29 @@ class Exploration_map : public rclcpp::Node
                         expanded = false;
                     }
                     RCLCPP_INFO(this->get_logger(),"min_x = %d, min_y = %d, max_x = %d, max_y = %d", std::get<1>(wall), std::get<0>(wall), std::get<3>(wall), std::get<2>(wall));
-
-                    /*
-                    if(!expand_map_sq){
-                        MapManager::getInstance().setVisited(current_pixel_goal, true);
+                    if(expand_map_sq){
+                        if(!expanded && !fail_flag && !split_route){
+                            RCLCPP_INFO(this->get_logger(), "CornerQueue pop");
+                            frontier_explorer_->popCornerQueue();
+                        }
+                        if(frontier_explorer_->getDesireCorner() == 0){
+                            RCLCPP_INFO(this->get_logger(), "Explore Finished");
+                            expand_map_sq = false;
+                        }
                     }
+
+                    // if(!expand_map_sq){
+                    //     MapManager::getInstance().setVisited(current_pixel_goal, true);
+                    // }
+
+                    explore = true;
+
                     if(fail_count == 20){
                         fail_count = 0;
                     }
-                    clearAround(map_, MapManager::getInstance(), PoseManager::getInstance());
-                    */
-                    explore = force_move ? false : true;
+
+                    if(explore){ RCLCPP_INFO(this->get_logger(), "Explore"); }
+                    else { RCLCPP_INFO(this->get_logger(), "Not Explore"); }
                 }
             }
         }
@@ -563,7 +683,6 @@ class Exploration_map : public rclcpp::Node
         }
 
         void map_callback(const nav_msgs::msg::OccupancyGrid::SharedPtr msg){
-            searching = false;
             if(msg->data.empty()){
                 RCLCPP_WARN(this->get_logger(), "Empty map");
                 return;
@@ -572,18 +691,19 @@ class Exploration_map : public rclcpp::Node
 
             map_ = *msg;
 
-            // search(map_); // map.data 에 따른 미탐색구역 visited 맵으로 동기화
+            if(!expand_map_sq){
+                MapManager& mm = MapManager::getInstance();
+                auto min_max = mm.getWall();
+                root_ = std::make_shared<QuadtreeNode>(std::get<0>(min_max), std::get<1>(min_max), std::get<2>(min_max), std::get<3>(min_max));
+                root_->split(map_);
 
-            searching = true;
+                publishSector(map_);
+            }
         }
 
         void pose_callback(const geometry_msgs::msg::PoseStamped::SharedPtr msg){
 
             PoseManager::getInstance().setLastPose(*msg);
-
-            if(!expand_map_sq){
-                publishVisitedPoints(map_); // visited 맵 시각화
-            }
         }
 
         void firstMove(){
@@ -609,47 +729,27 @@ class Exploration_map : public rclcpp::Node
             count++;
         }
 
-        bool isMapExpanding(const nav_msgs::msg::OccupancyGrid& map){
-            static unsigned int last_width = map.info.width;
-            static unsigned int last_height = map.info.height;
-            static double last_origin_x = map.info.origin.position.x;
-            static double last_origin_y = map.info.origin.position.y;
+        std::shared_ptr<QuadtreeNode> bestChild(std::shared_ptr<QuadtreeNode> root, const nav_msgs::msg::OccupancyGrid& map){
+            if(root == nullptr) return nullptr;
 
-            double width_height_threshold = 1.5;
-            double origin_threshold = 1.0;
-
-            if(last_width - map.info.width > width_height_threshold ||
-               last_height - map.info.height > width_height_threshold){
-                last_width = map.info.width;
-                last_height = map.info.height;
-                return true;
+            if(root->children(0) == nullptr){
+                return root;
             }
-            if(last_origin_x - map.info.origin.position.x > origin_threshold ||
-               last_origin_y - map.info.origin.position.y > origin_threshold){
-                last_origin_x = map.info.origin.position.x;
-                last_origin_y = map.info.origin.position.y;
-                return true;
-            }
-            return false;
-        }
 
-        void clearAround(const nav_msgs::msg::OccupancyGrid& map,
-                         MapManager& mm,
-                         PoseManager& PM){
-            geometry_msgs::msg::PoseStamped robot_pose = PM.getLastPose();
-            unsigned int pixel_y = (robot_pose.pose.position.y - map.info.origin.position.y) / map.info.resolution;
-            unsigned int pixel_x = (robot_pose.pose.position.x - map.info.origin.position.x) / map.info.resolution;
-            unsigned int clear_range = 10;
-            for(unsigned int y = pixel_y - clear_range ; y < pixel_y + clear_range; y++){
-                for(unsigned int x = pixel_x - clear_range ; x < pixel_x + clear_range; x++){
-                    if(y >= map.info.height || x >= map.info.width || x < 5 || y < 5){
-                        continue;
-                    }
-                    mm.markVisited({y, x});
+            std::shared_ptr<QuadtreeNode> best_child = nullptr;
+            double best_score = -1.0;
+            for(int i = 0; i < 4; i++){
+                std::shared_ptr<QuadtreeNode> child = root->children(i);
+                double score = child->evalute(map);
+                if(score > best_score){
+                    best_score = score;
+                    best_child = child;
                 }
             }
+            return bestChild(best_child, map);
         }
 
+        /*
         std::vector<std::vector<P>> GetObstacleShapes(const nav_msgs::msg::OccupancyGrid& map){
             std::vector<std::vector<P>> obstacle;
             std::vector<P> current_obs;
@@ -676,8 +776,8 @@ class Exploration_map : public rclcpp::Node
                 double laser_dist = laser_scan.ranges[i];
                 double laser_angle = laser_scan.angle_min + i * laser_scan.angle_increment;
 
-                if (std::isnan(laser_dist) || std::isinf(laser_dist) ||
-                    laser_dist < laser_scan.range_min || laser_dist > laser_scan.range_max) {
+                if(std::isnan(laser_dist) || std::isinf(laser_dist) ||
+                    laser_dist < laser_scan.range_min || laser_dist > laser_scan.range_max){
                     continue;
                 }
 
@@ -693,16 +793,16 @@ class Exploration_map : public rclcpp::Node
                 double obs_y_map = robot_y + obs_x_robot * sin(theta) + obs_y_robot * cos(theta);
                 double obs_x_map = robot_x + obs_x_robot * cos(theta) - obs_y_robot * sin(theta);
 
-                if (obs_x_map < origin_x || obs_y_map < origin_y ||
+                if(obs_x_map < origin_x || obs_y_map < origin_y ||
                     obs_x_map >= origin_x + width * resolution ||
-                    obs_y_map >= origin_y + height * resolution) {
+                    obs_y_map >= origin_y + height * resolution){
                     continue;
                 }
 
 
                 unsigned int pixel_y = (obs_y_map - origin_y) / resolution;
                 unsigned int pixel_x = (obs_x_map - origin_x) / resolution;
-                if (pixel_x >= width || pixel_y >= height) {
+                if(pixel_x >= width || pixel_y >= height){
                     continue; // 무효한 좌표는 무시
                 }
                 MapManager::getInstance().addOSingletonset(pixel_y, pixel_x);
@@ -714,7 +814,7 @@ class Exploration_map : public rclcpp::Node
 
 
 
-                if (!current_obs.empty() && (distance_diff > 0.5 || angle_diff > 0.1)) {
+                if(!current_obs.empty() && (distance_diff > 0.5 || angle_diff > 0.1)){
                     obstacle.push_back(current_obs);
                     current_obs.clear();
                 }
@@ -732,8 +832,7 @@ class Exploration_map : public rclcpp::Node
             return obstacle;
         }
 
-        void ObstacleFloodFill(const std::vector<std::vector<P>>& obstacles,
-                       const nav_msgs::msg::OccupancyGrid& map){
+        void ObstacleFloodFill(const std::vector<std::vector<P>>& obstacles){
             // RCLCPP_INFO(this->get_logger(),"flood fill");
             // int temp_size = obstacles.size();
             MapManager& mm = MapManager::getInstance();
@@ -750,7 +849,7 @@ class Exploration_map : public rclcpp::Node
 
                 std::set<P> obstacle_set(obstacle.begin(), obstacle.end());
 
-                for (const auto& point : obstacle) {
+                for(const auto& point : obstacle){
                     min_x = std::min(min_x, point.second);
                     min_y = std::min(min_y, point.first);
                     max_x = std::max(max_x, point.second);
@@ -776,7 +875,7 @@ class Exploration_map : public rclcpp::Node
                             // RCLCPP_INFO(this->get_logger(),"out of range");
                             continue;
                         }
-                        if(y >= map.info.height || x >= map.info.width){
+                        if(y >= std::get<2>(mm.getWall()) || x >= std::get<3>(mm.getWall())){
                             // RCLCPP_INFO(this->get_logger(),"out of range2");
                             continue;
                         }
@@ -805,57 +904,28 @@ class Exploration_map : public rclcpp::Node
 
             auto obstacles = GetObstacleShapes(map);
 
-            ObstacleFloodFill(obstacles, map);
+            ObstacleFloodFill(obstacles);
+        }
+        */
 
-            // RCLCPP_INFO(this->get_logger(),"scan obstacle done");
+        void publishSector(nav_msgs::msg::OccupancyGrid& map){
+            visualization_msgs::msg::MarkerArray marker_array;
+            visualization_msgs::msg::Marker clear;
+            clear.header.frame_id = "map";
+            clear.header.stamp = this->get_clock()->now();
+            clear.action = visualization_msgs::msg::Marker::DELETEALL;
+            clear.ns = "sector_lines";
+            marker_array.markers.push_back(clear);
+            sector_marker_pub_->publish(marker_array);
+            marker_array.markers.clear();
+
+            int id = 0;
+            root_->visualize(marker_array, id, map);
+            sector_marker_pub_->publish(marker_array);
 
         }
 
-        void transformCoord(const nav_msgs::msg::OccupancyGrid& map){
-            std::map<P, bool> transformed_visited;
-            std::set<P> transformed_singleton_set;
-            RCLCPP_INFO(this->get_logger(),"TRANSFORM COORD");
-            static double last_origin_x = map.info.origin.position.x;
-            static double last_origin_y = map.info.origin.position.y;
-            double origin_x = map.info.origin.position.x;
-            double origin_y = map.info.origin.position.y;
-            double resolution = map.info.resolution;
-            if(std::fabs(last_origin_x - origin_x) < 0.01 || std::fabs(last_origin_y == origin_y) < 0.01){return;}
-            MapManager& mm = MapManager::getInstance();
-
-            auto transformPoints = [&](const P& p) -> P{
-                double actual_x = p.second * resolution + last_origin_x;
-                double actual_y = p.first * resolution + last_origin_y;
-
-                double dx = origin_x - last_origin_x;
-                double dy = origin_y - last_origin_y;
-
-                actual_x += dx;
-                actual_y += dy;
-
-                unsigned int pixel_x = static_cast<unsigned int>(std::round((actual_x - origin_x) / resolution));
-                unsigned int pixel_y = static_cast<unsigned int>(std::round((actual_y - origin_y) / resolution));
-
-                return {pixel_y, pixel_x};
-            };
-
-            for(const auto& iter : mm.getVisited()){
-                transformed_visited[transformPoints(iter.first)] = iter.second;
-            }
-
-            for(const auto& p : mm.getSingletonset()){
-                transformed_singleton_set.insert(transformPoints(p));
-            }
-
-            last_origin_x = map.info.origin.position.x;
-            last_origin_y = map.info.origin.position.y;
-            mm.clearVisited();
-            mm.clearSingletonset();
-            mm.getVisited() = transformed_visited;
-            mm.getSingletonset() = transformed_singleton_set;
-        }
-
-        void publishVisitedPoints(const nav_msgs::msg::OccupancyGrid& map) {
+        void publishVisitedPoints(const nav_msgs::msg::OccupancyGrid& map){
             // 미탐색 좌표 시각화
             visualization_msgs::msg::Marker points_unexplored;
             points_unexplored.header.frame_id = "map";
@@ -872,7 +942,7 @@ class Exploration_map : public rclcpp::Node
 
             points_unexplored.points.clear();
 
-            for (const auto& itr : MapManager::getInstance().getVisited()) {
+            for(const auto& itr : MapManager::getInstance().getVisited()){
                 if(itr.second == false){
                     geometry_msgs::msg::Point p;
                     p.y = itr.first.first * map.info.resolution + map.info.origin.position.y;
@@ -883,6 +953,7 @@ class Exploration_map : public rclcpp::Node
             }
             visit_marker_pub_->publish(points_unexplored);
         }
+
         void publishscanPoints(const sensor_msgs::msg::LaserScan& laser_scan,
                                const int& index, const double& theta){
             //해당 인덱스의 레이저 스캔 좌표 시각화
@@ -943,7 +1014,7 @@ class Exploration_map : public rclcpp::Node
             laser_marker_pub_->publish(laser_line);
         }
 
-        void publishGoalPoints(const geometry_msgs::msg::PoseStamped& goal) {
+        void publishGoalPoints(const geometry_msgs::msg::PoseStamped& goal){
             //목표 시각화
             visualization_msgs::msg::Marker goal_point;
             goal_point.header.frame_id = "map";
@@ -975,34 +1046,23 @@ class Exploration_map : public rclcpp::Node
             // RCLCPP_INFO(this->get_logger(),"search");
             MapManager& mm = MapManager::getInstance();
 
-
-            static std::vector<int8_t> last_map_data;
-
-            if(last_map_data.empty()){
-                last_map_data = map.data;
+            unsigned int height = std::get<2>(mm.getWall());
+            unsigned int width = std::get<3>(mm.getWall());
+            if(height < 10 || width < 10){
+                return;
             }
 
-            unsigned int height = map.info.height;
-            unsigned int width = map.info.width;
-
-
-            for(unsigned int y = 10; y < height - 10; y++){
-                for(unsigned int x = 10; x < width - 10; x++){
-                    unsigned int idx = Utility::pixelcoordtoidx(y, x, width);
-                    if(last_map_data[idx] != map.data[idx]){
-                        map_data_stable = false;
-                        if(map.data[idx] == -1){
-                            mm.insertVisited(y, x, false);
-                        }else{
-                            mm.setVisited(y, x, true);
-                        }
+            for(unsigned int y = 10; y <= height - 10; y++){
+                for(unsigned int x = 10; x <= width - 10; x++){
+                    unsigned int idx = Utility::pixelcoordtoidx(y, x, map.info.width);
+                    if(map.data[idx] == -1){
+                        mm.insertVisited(y, x, false);
                     }else{
-                        map_data_stable = true;
+                        mm.setVisited(y, x, true);
                     }
                 }
             }
-            last_map_data = map.data;
-            // RCLCPP_INFO(this->get_logger(),"search done");
+
         }
 
         std::pair<double, double> setGoal_Angleanddist(const nav_msgs::msg::OccupancyGrid& map, double laser_angle_rad, double distance){
@@ -1038,7 +1098,7 @@ class Exploration_map : public rclcpp::Node
             double laser_angle_min = LM.getLaserMsg().angle_min;
             double laser_angle_increment = LM.getLaserMsg().angle_increment;
             int index = (relative_angle_to_goal - laser_angle_min) / laser_angle_increment;
-
+            index -= 2; // temp
             publishscanPoints(LM.getLaserMsg(), index, relative_angle_to_goal);
             RCLCPP_INFO(this->get_logger(), "index at goal direction : %d", index);
 
@@ -1048,22 +1108,29 @@ class Exploration_map : public rclcpp::Node
             RCLCPP_WARN(this->get_logger(), "목표까지의 거리 : %f ", dist_goal);
             RCLCPP_WARN(this->get_logger(), "측정 거리 : %f ", range_at_angle);
 
-            if (std::isinf(range_at_angle)){
-                RCLCPP_INFO(this->get_logger(), "No valid data at this angle.");
+            if(dist_goal < 1){
+                split_route = false;
+            }
+            if(std::isinf(range_at_angle)){
+                RCLCPP_INFO(this->get_logger(), "No valid data at this angle");
                 double angle_rad = index * M_PI / 180.0;
-                std::pair<double, double> another_goal = setGoal_Angleanddist(map, angle_rad, 10); // 10 = temp;
+                std::pair<double, double> another_goal;
+
+                another_goal = setGoal_Angleanddist(map, angle_rad, dist_goal);
+
                 PM.getGoalPose().pose.position.x = another_goal.second;
                 PM.getGoalPose().pose.position.y = another_goal.first;
-
                 publishGoalPoints(PM.getGoalPose());
-                return;
             }
+
             double threshold = -0.1;
             if(dist_goal - range_at_angle > threshold){ // 목표지점이 장애물 너머일 경우
                 RCLCPP_INFO(this->get_logger(), "is over obstacle");
-
-                setGoalbesideObstacle(LM.getLaserMsg(), map, index, dist_goal, fail_count);
-
+                if(dist_goal > 15.0){
+                    split_route = true;
+                    range_at_angle /= 2.0;
+                }
+                setGoalbesideObstacle(LM.getLaserMsg(), map, index, range_at_angle, fail_count);
             }else{ // 아닐경우
                 RCLCPP_ERROR(this->get_logger(), "is not over obstacle, Dg : %f , RaA : %f", dist_goal, range_at_angle);
                 publishGoalPoints(PM.getGoalPose());
@@ -1086,15 +1153,14 @@ class Exploration_map : public rclcpp::Node
             double prev_dist_neg = laser_scan.ranges[index];
 
             double min_angle_threshold = 0.25;
+            int pos_dir = index + 1;
+            int neg_dir = index - 1;
 
-            for(int pos_dir = index + 1, neg_dir = index - 1;
-                pos_dir  <= 360 && neg_dir >= 0;
-                pos_dir++, neg_dir--){
-
+            while(true && rclcpp::ok()){
                 if(neg_dir == -1){
                     neg_dir = 359;
                 }
-                if (pos_dir == 360) {
+                if(pos_dir == 360){
                     pos_dir = 0;
                 }
 
@@ -1128,6 +1194,8 @@ class Exploration_map : public rclcpp::Node
                     RCLCPP_INFO(this->get_logger(),"negative side goal set, laser_angle : %f", laser_angle);
                     break;
                 }
+                pos_dir++;
+                neg_dir--;
 
             }
             laser_angle = std::clamp(laser_angle, 0.0, 360.0);
@@ -1154,6 +1222,7 @@ class Exploration_map : public rclcpp::Node
             PM.getGoalPose().pose.position.y = another_goal.first;
 
             publishGoalPoints(PM.getGoalPose());
+            isOverObstacle(map, PM, LaserManager::getInstance(), fail_count + 1);
         }
 
         void pubGoal( P goal, const nav_msgs::msg::OccupancyGrid& map){
@@ -1196,11 +1265,10 @@ class Exploration_map : public rclcpp::Node
         bool test = false;
         rclcpp::Time pub_time;
 
+        bool split_route = false;
         bool first_move = true;
         bool expanded = false;
         bool explore = true; // 동작 완료 후 활성 , 이동 없는 테스트는 비활성
-        bool searching = false;
-        bool map_data_stable = false;
         bool expand_map_sq = true;
         bool fail_flag = false;
         bool force_move = false;
@@ -1208,11 +1276,11 @@ class Exploration_map : public rclcpp::Node
         P last_fail_point;
         P current_pixel_goal;
 
+        std::shared_ptr<QuadtreeNode> root_;
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
         std::shared_ptr<tf2_ros::TransformListener> tf_listener_;
         std::shared_ptr<FrontierExplorer> frontier_explorer_;
-        std::shared_ptr<NotSearchedFirstExplorer> not_searched_first_explorer_;
-        std::shared_ptr<SectorManager> sector_manager_;
+        // std::shared_ptr<NotSearchedFirstExplorer> not_searched_first_explorer_;
 
 
         nav_msgs::msg::OccupancyGrid map_;
@@ -1224,9 +1292,9 @@ class Exploration_map : public rclcpp::Node
         rclcpp::Subscription<nav_msgs::msg::OccupancyGrid>::SharedPtr map_sub_;
         rclcpp::Publisher<geometry_msgs::msg::PoseStamped>::SharedPtr goal_pub_;
         rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr visit_marker_pub_;
-        rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr best_heading_dir_pub_;
         rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr laser_marker_pub_;
         rclcpp::Publisher<visualization_msgs::msg::Marker>::SharedPtr goal_marker_pub_;
+        rclcpp::Publisher<visualization_msgs::msg::MarkerArray>::SharedPtr sector_marker_pub_;
 
 };
 
