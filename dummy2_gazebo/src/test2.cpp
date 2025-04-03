@@ -272,15 +272,15 @@ class QuadtreeNode {
                 score -= 50;
             }
 
-            score += explored_rate * 0.3;
-            if(explored_rate > 0.75 || unexplored_rate < 0.1){
+            score += explored_rate * 0.4;
+            if(explored_rate > 0.90 || unexplored_rate < 0.1){
                 score -= explored_rate * 0.4;
             }
 
-            if(unexplored_rate > 0.65){
+            if(unexplored_rate > 0.75){
                 score -= unexplored_rate * 0.8;
             }else{
-                score += unexplored_rate * 0.7;
+                score += unexplored_rate * 0.6;
             }
 
 
@@ -534,18 +534,18 @@ class FrontierExplorer{
             unsigned int frontier_goal[4][2] = {{max_y, max_x}, {max_y, min_x}, {min_y, min_x}, {min_y, max_x}};
 
             P current_desire_goal = {frontier_goal[sector - 1][0], frontier_goal[sector - 1][1]};
-            P fixed_goal = findSafeGoal(current_desire_goal, sector);
-            return fixed_goal;
+            // P fixed_goal = findSafeGoal(current_desire_goal, sector);
+            return current_desire_goal;
         }
 
-        P findSafeGoal(P coord, int sector){
-            int offset_points = 20;
-            int offset[4][2] = {{-offset_points - 5, -offset_points - 5}, {-offset_points, offset_points},
-                                {offset_points, offset_points}, {offset_points, -offset_points}};
+        // P findSafeGoal(P coord, int sector){
+        //     int offset_points = 20;
+        //     int offset[4][2] = {{-offset_points - 5, -offset_points - 5}, {-offset_points, offset_points},
+        //                         {offset_points, offset_points}, {offset_points, -offset_points}};
 
-            P fixed_goal = {coord.first + offset[sector - 1][0], coord.second + offset[sector - 1][1]};
-            return fixed_goal;
-        }
+        //     P fixed_goal = {coord.first + offset[sector - 1][0], coord.second + offset[sector - 1][1]};
+        //     return fixed_goal;
+        // }
 
     private:
         rclcpp::Node* node_;
@@ -668,8 +668,8 @@ class Exploration_map : public rclcpp::Node
                     int sector = frontier_explorer_->getDesireCorner();
                     RCLCPP_INFO(this->get_logger(), "Explore Corner : %d", sector);
 
-                    current_pixel_goal = frontier_explorer_->mapExpandingSequence(sector);
-                    auto temp_real_coord = Utility::pixeltoreal(current_pixel_goal, map_);
+                    current_pixel_goal_ = frontier_explorer_->mapExpandingSequence(sector);
+                    auto temp_real_coord = Utility::pixeltoreal(current_pixel_goal_, map_);
                     auto temp_last_pose = PoseManager::getInstance().getLastPose();
                     double dist = Utility::distance(temp_real_coord, {temp_last_pose.pose.position.y, temp_last_pose.pose.position.x});
                     if(dist > 20.0){
@@ -696,12 +696,12 @@ class Exploration_map : public rclcpp::Node
 
 
 
-                        current_pixel_goal = {goal_y, goal_x};
+                        current_pixel_goal_ = {goal_y, goal_x};
 
                     }
                 }
-                RCLCPP_INFO(this->get_logger(), "pixel goal : %d, %d", current_pixel_goal.second, current_pixel_goal.first);
-                pubGoal(current_pixel_goal, map_);
+                RCLCPP_INFO(this->get_logger(), "pixel goal : %d, %d", current_pixel_goal_.second, current_pixel_goal_.first);
+                pubGoal(current_pixel_goal_, map_);
                 explore = false;
                 expanded = false;
             }
@@ -789,13 +789,17 @@ class Exploration_map : public rclcpp::Node
             if(!expand_map_sq && !first_move){
                 MapManager& mm = MapManager::getInstance();
                 auto min_max = mm.getWall();
+                unsigned int min_y = std::get<0>(min_max);
+                unsigned int min_x = std::get<1>(min_max);
+                unsigned int max_y = std::get<2>(min_max);
+                unsigned int max_x = std::get<3>(min_max);
 
                 if(root_ == nullptr){
-                        root_ = std::make_shared<QuadtreeNode>(std::get<0>(min_max), std::get<1>(min_max), std::get<2>(min_max), std::get<3>(min_max));
-                // }else if(expanded){
-                //     std::shared_ptr<QuadtreeNode> new_root = std::make_shared<QuadtreeNode>(min_y, min_x, max_y, max_x);
-                //     copyQuadtree(root_, new_root);
-                //     root_ = new_root;
+                    root_ = std::make_shared<QuadtreeNode>(min_y, min_x, max_y, max_x);
+                }else if(expanded){
+                    std::shared_ptr<QuadtreeNode> new_root = std::make_shared<QuadtreeNode>(min_y, min_x, max_y, max_x);
+                    copyQuadtree(root_, new_root);
+                    root_ = new_root;
                 }
                 root_->split(map_);
 
@@ -882,6 +886,7 @@ class Exploration_map : public rclcpp::Node
 
         void copyQuadtree(std::shared_ptr<QuadtreeNode> old_node, std::shared_ptr<QuadtreeNode> new_node){
             if(old_node == nullptr) return;
+            if(new_node == nullptr) return;
 
             new_node->increaseVisitedCount(old_node->getVisitedCount());
 
@@ -951,64 +956,6 @@ class Exploration_map : public rclcpp::Node
             visit_marker_pub_->publish(points_unexplored);
         }
 
-        void publishscanPoints(const sensor_msgs::msg::LaserScan& laser_scan,
-                               const int& index, const double& theta){
-            //해당 인덱스의 레이저 스캔 좌표 시각화
-            double range = laser_scan.ranges[index];
-
-
-            visualization_msgs::msg::Marker laser_line;
-            laser_line.header.frame_id = "map";
-            laser_line.header.stamp = this->get_clock()->now();
-            laser_line.ns = "laser_line";
-            laser_line.id = 0;
-            laser_line.type = visualization_msgs::msg::Marker::LINE_STRIP;
-            laser_line.action = visualization_msgs::msg::Marker::ADD;
-            laser_line.scale.x = 0.05;
-            laser_line.color.a = 1.0;
-            laser_line.color.r = 1.0;
-            laser_line.color.g = 0.0;
-            laser_line.color.b = 0.0;
-
-            //tf 변환
-            try{
-                geometry_msgs::msg::TransformStamped transform = tf_buffer_->lookupTransform(
-                    "map", "base_link", rclcpp::Time(0)
-                );
-                geometry_msgs::msg::PointStamped base_link_origin;
-                base_link_origin.header.frame_id = "base_link";
-                base_link_origin.header.stamp = this->get_clock()->now();
-                base_link_origin.point.x = 0.215;
-                base_link_origin.point.y = 0.0;
-                base_link_origin.point.z = 0.0;
-
-                geometry_msgs::msg::PointStamped map_origin;
-                tf2::doTransform(base_link_origin, map_origin, transform); // 로봇 좌표계 -> 지도 좌표계
-
-                laser_line.points.clear();
-                laser_line.points.push_back(map_origin.point);
-
-                geometry_msgs::msg::Point base_link_point;
-                base_link_point.x = cos(theta) * range;
-                base_link_point.y = sin(theta) * range;
-                base_link_point.z = 0.0;
-
-                geometry_msgs::msg::PointStamped base_link_point_stamped;
-                base_link_point_stamped.header.frame_id = "base_link";
-                base_link_point_stamped.header.stamp = this->get_clock()->now();
-                base_link_point_stamped.point = base_link_point;
-
-                geometry_msgs::msg::PointStamped map_point;
-                tf2::doTransform(base_link_point_stamped, map_point, transform);
-                laser_line.points.push_back(map_point.point);
-
-            }catch(tf2::TransformException &ex){
-                RCLCPP_ERROR(this->get_logger(), "Transform error : %s", ex.what());
-                return;
-            }
-
-            laser_marker_pub_->publish(laser_line);
-        }
 
         void publishGoalPoints(const geometry_msgs::msg::PoseStamped& goal){
             //목표 시각화
@@ -1059,14 +1006,14 @@ class Exploration_map : public rclcpp::Node
 
         }
 
-        void pubGoal( P goal, const nav_msgs::msg::OccupancyGrid& map){
+        void pubGoal(P goal, const nav_msgs::msg::OccupancyGrid& map){
             PoseManager& pm = PoseManager::getInstance();
             geometry_msgs::msg::PoseStamped goal_msg;
             goal_msg.header.stamp = this->now();
             goal_msg.header.frame_id = "map";
-            // RCLCPP_INFO(this->get_logger(), "Goal_pixel : (x : %d, y : %d)", goal.second, goal.first);
             goal_msg.pose.position.y = map.info.origin.position.y + goal.first * map.info.resolution;
             goal_msg.pose.position.x = map.info.origin.position.x + goal.second * map.info.resolution;
+
             // goal_msg.pose.position.x = 5.0; // for test
             // goal_msg.pose.position.y = 0.0;
             // RCLCPP_INFO(this->get_logger(), "초기 목표 : (x : %f, y : %f)", goal_msg.pose.position.x, goal_msg.pose.position.y);
@@ -1095,11 +1042,11 @@ class Exploration_map : public rclcpp::Node
         bool first_move = true;
         bool expanded = false;
         bool explore = true; // 동작 완료 후 활성 , 이동 없는 테스트는 비활성
-        bool expand_map_sq = true;
+        bool expand_map_sq = false;
         bool fail_flag = false;
         bool force_move = false;
         bool end_explore = false;
-        P current_pixel_goal;
+        P current_pixel_goal_;
 
         std::shared_ptr<QuadtreeNode> root_;
         std::shared_ptr<tf2_ros::Buffer> tf_buffer_;
