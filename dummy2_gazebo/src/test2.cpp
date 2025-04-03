@@ -238,17 +238,6 @@ class Utility{
             return (y * width + x);
         }
 
-        static bool isSameTuple(std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> a,
-                                 std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> b){
-            int threshold = 5;
-            if( std::abs((int)std::get<0>(a) - (int)std::get<0>(b)) > threshold ||
-                std::abs((int)std::get<1>(a) - (int)std::get<1>(b)) > threshold ||
-                std::abs((int)std::get<2>(a) - (int)std::get<2>(b)) > threshold ||
-                std::abs((int)std::get<3>(a) - (int)std::get<3>(b)) > threshold){
-                    return false;
-               }
-            return true;
-        }
 
         static std::pair<double, double> pixeltoreal(P pixel_coord, nav_msgs::msg::OccupancyGrid map){
             double real_x = (pixel_coord.second * map.info.resolution) + map.info.origin.position.x;
@@ -499,16 +488,19 @@ class FrontierExplorer{
         FrontierExplorer(rclcpp::Node* node)
             : node_(node){}
 
+        int checkDataSize(const nav_msgs::msg::OccupancyGrid& map){
+            int diff = (int)map.data.size() - map_data_size_;
+            if(diff > 0)
+                return map_data_size_ = (int)map.data.size();
+            else
+                return 0;
+        }
         void setFrontier(const nav_msgs::msg::OccupancyGrid& map){
             MapManager& mm = MapManager::getInstance();
             unsigned int width = map.info.width;
-
-            for(unsigned int idx = 0; idx < map.data.size(); idx++){
-                unsigned int temp_x = idx % width;
-                unsigned int temp_y = idx / width;
-
-                mm.updateWall(temp_y, temp_x, temp_y, temp_x);
-            }
+            unsigned int height = map.info.height;
+            if(width != 0 && height != 0)
+                mm.updateWall(0, 0, height, width);
         }
 
         int getDesireCorner(){
@@ -558,6 +550,7 @@ class FrontierExplorer{
     private:
         rclcpp::Node* node_;
         std::queue<int> corner_queue;
+        int map_data_size_ = 0;
 };
 
 class NotSearchedFirstExplorer{
@@ -744,7 +737,7 @@ class Exploration_map : public rclcpp::Node
                     RCLCPP_INFO(this->get_logger(), "@@@@@@@@@@@@@@ READY 2 MOVE @@@@@@@@@@@@@@");
                     auto wall = MapManager::getInstance().getWall();
                     static std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> last_wall;
-                    if(!Utility::isSameTuple(last_wall, wall)){
+                    if(frontier_explorer_->checkDataSize(map_) > 0){
                         last_wall = wall;
                         RCLCPP_INFO(this->get_logger(),"Map Expanded");
                         expanded = true;
