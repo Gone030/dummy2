@@ -250,7 +250,7 @@ class Utility{
 class QuadtreeNode {
     public:
         QuadtreeNode(unsigned int min_y, unsigned int min_x, unsigned int max_y, unsigned int max_x)
-            : min_y_(min_y), min_x_(min_x), max_y_(max_y), max_x_(max_x), visited_count_(0) {
+            : min_y_(min_y), min_x_(min_x), max_y_(max_y), max_x_(max_x), visited_count_(0){
             for(int i = 0; i < 4; i++){
                 children_[i] = nullptr;
             }
@@ -293,7 +293,7 @@ class QuadtreeNode {
                 if(explored_rate < 0.8){
                     score += explored_rate;
                 }else{
-                    score -= explored_rate * 2.0;
+                    score -= 15.0;
                 }
                 if(unexplored_rate > 0.2 && unexplored_rate < 0.8 ){
                     score += unexplored_rate * 2.5;
@@ -423,9 +423,14 @@ class QuadtreeNode {
 
         std::shared_ptr<QuadtreeNode> children(int i) const { return children_[i]; }
 
+        void setChild(int i, std::shared_ptr<QuadtreeNode> child){
+            if(i >= 0 && i < 4){
+                children_[i] = child;
+            }
+        }
 
-        void increaseVisitedCount(int count){ visited_count_ = count; }
-        void increaseVisitedCount(){ visited_count_++; }
+        void setVisitedCount(int count){ visited_count_ = count; }
+        void increaseVisitedCount(int count = 1){ visited_count_ += count; }
         int getVisitedCount(){ return visited_count_; }
 
         void setIsMerged(bool is_merged){ is_merged_ = is_merged; }
@@ -682,24 +687,6 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                 }
                 if(node_name_ == "RateController" && current_status_ == "IDLE"){
                     RCLCPP_INFO(this->get_logger(), "@@@@@@@@@@@@@@ READY 2 MOVE @@@@@@@@@@@@@@");
-                    auto wall = MapManager::getInstance().getWall();
-                    static std::tuple<unsigned int, unsigned int, unsigned int, unsigned int> last_wall;
-                    if(frontier_explorer_->checkDataSize(map_) > 0){
-                        last_wall = wall;
-                        RCLCPP_INFO(this->get_logger(),"Map Expanded");
-                        expanded = true;
-                    }
-
-                    if(expand_map_sq){
-                        if(!expanded && !fail_flag && !split_route){
-                            RCLCPP_INFO(this->get_logger(), "CornerQueue pop");
-                            frontier_explorer_->popCornerQueue();
-                        }
-                        if(frontier_explorer_->getDesireCorner() == 0){
-                            RCLCPP_INFO(this->get_logger(), "Explore Finished");
-                            expand_map_sq = false;
-                        }
-                    }
 
                     // if(!expand_map_sq){
                     //     MapManager::getInstance().setVisited(current_pixel_goal, true);
@@ -727,7 +714,19 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                 RCLCPP_WARN(this->get_logger(), "Empty map");
                 return;
             }
-            frontier_explorer_->setFrontier(map_);
+            static unsigned int last_width = 0, last_height = 0;
+            if(msg->info.width - last_width > 5 || msg->info.height - last_height > 3){
+                RCLCPP_WARN(this->get_logger(),
+                           "Map size changed: %u x %u -> %u x %u",
+                           last_width, last_height,
+                           msg->info.width, msg->info.height);
+
+                MapManager::getInstance().updateWall(0, 0, msg->info.height, msg->info.width);
+
+                expanded = true;
+                last_width = msg->info.width;
+                last_height = msg->info.height;
+            }
 
             map_ = *msg;
 
@@ -741,21 +740,26 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
 
                 if(root_ == nullptr){
                     RCLCPP_INFO(this->get_logger(), "First root created");
-
                     root_ = std::make_shared<QuadtreeNode>(min_y, min_x, max_y, max_x);
                 }
                 else if(expanded){
+                    // RCLCPP_ERROR(this->get_logger(), "지도 확장 처리 시작 - copyQuadtree 호출 직전");
+                    node_visits_.clear();
+                    saveNodeVisits(root_);
+                    // RCLCPP_ERROR(this->get_logger(), "방문 정보 저장 완료: %zu 개의 노드", node_visits_.size());
+
                     std::shared_ptr<QuadtreeNode> new_root = std::make_shared<QuadtreeNode>(min_y, min_x, max_y, max_x);
+                    // RCLCPP_ERROR(this->get_logger(), "새 루트 노드 생성: [%u,%u,%u,%u]", min_y, min_x, max_y, max_x);
                     copyQuadtree(root_, new_root);
+                    // RCLCPP_ERROR(this->get_logger(), "copyQuadtree 함수 실행 완료");
                     root_ = new_root;
-                        RCLCPP_INFO(this->get_logger(), "Map Expanded");
-                        RCLCPP_INFO(this->get_logger(), "height : %d, width : %d", map_.info.height, map_.info.width);
-                        RCLCPP_INFO(this->get_logger(), "max_y : %d, max_x : %d", max_y, max_x);
-                        expanded = false;
+                    // RCLCPP_ERROR(this->get_logger(), "root_ 교체 완료, 방문 횟수: %d", root_->getVisitedCount());
+
+                    expanded = false;
                 }
                 root_->split(map_);
                 // else if(root_ != nullptr){
-                //     root_->split(map_, [weak_this = std::enable_shared_from_this<Exploration_map>::weak_from_this()]() {
+                //     root_->split(map_, [weak_this = std::enable_shared_from_this<Exploration_map>::weak_from_this()](){
                 //             if(auto shared_this = weak_this.lock()){
                 //                 shared_this->initializeRoot();
                 //             }
@@ -792,7 +796,9 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
             count++;
         }
 
-        std::shared_ptr<QuadtreeNode> bestChild(std::shared_ptr<QuadtreeNode> root, const nav_msgs::msg::OccupancyGrid& map, int depth = 0){
+        std::shared_ptr<QuadtreeNode> bestChild(std::shared_ptr<QuadtreeNode> root, const nav_msgs::msg::OccupancyGrid& map, int depth = 0,
+                                                std::shared_ptr<QuadtreeNode> parent = nullptr, int child_idx = -1,
+                                                std::set<std::shared_ptr<QuadtreeNode>> visited_siblings = {}){
 
             if(root == nullptr){
                 RCLCPP_WARN(this->get_logger(),"Root is Null");
@@ -805,8 +811,11 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
             }
 
             if(root->children(0) == nullptr){
-                RCLCPP_WARN(this->get_logger(),"Leaf node, visited count: %d", root->getVisitedCount());
+                RCLCPP_INFO(this->get_logger(), "Leaf node BEFORE increment: count=%d, node=%p",
+                root->getVisitedCount(), (void*)root.get());
+
                 root->increaseVisitedCount();
+                RCLCPP_INFO(this->get_logger(), "Leaf node AFTER increment: count=%d", root->getVisitedCount());
                 // RCLCPP_INFO(this->get_logger(), "Leaf node, root address: %p, visited count: %d", (void*)root.get(), root->getVisitedCount());
                 return root;
             }
@@ -840,15 +849,16 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
             }
 
             if(all_children_invalid){
-                RCLCPP_WARN(this->get_logger(),"All children invalid, visited count: %d", root->getVisitedCount());
+                // RCLCPP_WARN(this->get_logger(),"All children invalid, visited count: %d", root->getVisitedCount());
                 std::shared_ptr<QuadtreeNode> least_bad_child = nullptr;
                 double least_bad_score = - std::numeric_limits<double>::max();
+                const double MIN_SCORE = -10.0;
 
                 for(int i = 0; i < 4; i++){
                     std::shared_ptr<QuadtreeNode> child = root->children(i);
                     if(!child) continue;
                     double score = child->evalute(map);
-                    if(score > least_bad_score){
+                    if(score > least_bad_score && score > MIN_SCORE){
                         least_bad_score = score;
                         least_bad_child = child;
                         publishGoalSector(map_, least_bad_child->min_x(), least_bad_child->min_y(), least_bad_child->max_x(), least_bad_child->max_y());
@@ -860,8 +870,41 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                     return least_bad_child;
                 }
 
+                if(parent != nullptr && child_idx >= 0){
+                    visited_siblings.insert(root);
+
+                    // RCLCPP_INFO(this->get_logger(), "Trying to find a sibling node");
+                    for(int i = 0; i < 4; i++){
+                        if(i == child_idx) continue;
+
+                        std::shared_ptr<QuadtreeNode> sibling = parent->children(i);
+                        if(!sibling) continue;
+
+                        if(visited_siblings.find(sibling) != visited_siblings.end()){
+                            // RCLCPP_INFO(this->get_logger(), "Skipping already visited sibling");
+                            continue;
+                        }
+
+                        double score = sibling->evalute(map);
+                        if(score > 0){
+                            publishGoalSector(map_ , sibling->min_x(), sibling->min_y(), sibling->max_x(), sibling->max_y());
+                            return bestChild(sibling, map, depth, parent, i, visited_siblings);
+                        }
+                    }
+
+                    if(visited_siblings.size() >= 3){ // 형제 노드 탐색 횟수 제한
+                        // RCLCPP_INFO(this->get_logger(), "going to grandparent");
+
+                        // 만약 부모의 부모가 있다면 해당 노드에서 재탐색
+                        if(parent != nullptr && parent->getVisitedCount() < 3){ // 부모 노드 방문 횟수도 고려
+                            parent->increaseVisitedCount();
+                            return parent; // 부모 노드로 돌아감
+                        }
+                    }
+                    // RCLCPP_INFO(this->get_logger(), "returning to mama");
+                }
+
                 root->increaseVisitedCount();
-                // RCLCPP_INFO(this->get_logger(), "All children invalid, root address: %p, visited count: %d", (void*)root.get(), root->getVisitedCount());
                 return root;
             }
 
@@ -869,28 +912,137 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                 RCLCPP_WARN(this->get_logger(),"Best child is Null");
                 return root;
             }
-            return bestChild(best_child, map, depth + 1);
+
+            int selected_child_idx = -1;
+            for(int i = 0; i < 4; i++){
+                if(root->children(i) == best_child){
+                    selected_child_idx = i;
+                    break;
+                }
+            }
+
+            return bestChild(best_child, map, depth + 1, root, selected_child_idx, {});
         }
 
+        void saveNodeVisits(std::shared_ptr<QuadtreeNode> node){
+            if(node == nullptr) return;
 
-        void copyQuadtree(std::shared_ptr<QuadtreeNode> old_node, std::shared_ptr<QuadtreeNode> new_node){
-            if(old_node == nullptr) return;
-            if(new_node == nullptr) return;
+            double real_min_y = node->min_y() * map_.info.resolution + map_.info.origin.position.y;
+            double real_min_x = node->min_x() * map_.info.resolution + map_.info.origin.position.x;
+            double real_max_y = node->max_y() * map_.info.resolution + map_.info.origin.position.y;
+            double real_max_x = node->max_x() * map_.info.resolution + map_.info.origin.position.x;
 
-            new_node->increaseVisitedCount(old_node->getVisitedCount());
-            new_node->setIsMerged(old_node->getIsMerged());
+            std::tuple<double, double, double, double> key =
+                { real_min_y, real_min_x, real_max_y, real_max_x };
+            node_visits_[key] = node->getVisitedCount();
 
             for(int i = 0; i < 4; i++){
-                if(old_node->children(i) != nullptr) {
-                    std::shared_ptr<QuadtreeNode> old_child = old_node->children(i);
-                    if(old_child != nullptr){
-                        unsigned int min_y = old_node->children(i)->min_y();
-                        unsigned int min_x = old_node->children(i)->min_x();
-                        unsigned int max_y = old_node->children(i)->max_y();
-                        unsigned int max_x = old_node->children(i)->max_x();
-                        new_node->children(i) = std::make_shared<QuadtreeNode>(min_y, min_x, max_y, max_x);
-                        copyQuadtree(old_node->children(i), new_node->children(i));
+                if(node->children(i) != nullptr){
+                    saveNodeVisits(node->children(i));
+                }
+            }
+        }
+
+        void copyQuadtree(std::shared_ptr<QuadtreeNode> old_node, std::shared_ptr<QuadtreeNode> new_node){
+            if(old_node == nullptr){
+                // RCLCPP_ERROR(this->get_logger(), "old_node is null, 복사 중단");
+                return;
+            }
+            if(new_node == nullptr){
+                // RCLCPP_ERROR(this->get_logger(), "new_node is null, 복사 중단");
+                return;
+            }
+
+
+            double new_real_min_y = new_node->min_y() * map_.info.resolution + map_.info.origin.position.y;
+            double new_real_min_x = new_node->min_x() * map_.info.resolution + map_.info.origin.position.x;
+            double new_real_max_y = new_node->max_y() * map_.info.resolution + map_.info.origin.position.y;
+            double new_real_max_x = new_node->max_x() * map_.info.resolution + map_.info.origin.position.x;
+
+
+            int best_visit_count = 0;
+            double best_sync = 0.0;
+
+            for(const auto& [key, visit_count] : node_visits_){
+                double old_min_y = std::get<0>(key);
+                double old_min_x = std::get<1>(key);
+                double old_max_y = std::get<2>(key);
+                double old_max_x = std::get<3>(key);
+
+                double sync_min_x = std::max(new_real_min_x, old_min_x);
+                double sync_max_x = std::min(new_real_max_x, old_max_x);
+                double sync_min_y = std::max(new_real_min_y, old_min_y);
+                double sync_max_y = std::min(new_real_max_y, old_max_y);
+
+                if(sync_min_x < sync_max_x && sync_min_y < sync_max_y){
+                    double sync_width = sync_max_x - sync_min_x;
+                    double sync_height = sync_max_y - sync_min_y;
+                    double sync_area = sync_width * sync_height;
+
+                    double new_area = ((new_node->max_x() - new_node->min_x()) * (new_node->max_y() - new_node->min_y()));
+                    double old_area = (old_max_x - old_min_x) * (old_max_y - old_min_y);
+                    double ratio = static_cast<double>(sync_area) / std::min(new_area, old_area);
+
+                    if(ratio > 0.6 && ratio > best_sync){
+                        best_sync = ratio;
+                        best_visit_count = visit_count;
                     }
+                }
+            }
+            // RCLCPP_INFO(this->get_logger(),"ratio : %f, count : %d", best_sync, best_visit_count);
+            if(best_visit_count > 0){
+                new_node->setVisitedCount(best_visit_count);
+                RCLCPP_WARN(this->get_logger(),
+                           "Node visit count preserved: %d (sync: %.2f%%)",
+                           best_visit_count, best_sync * 100.0);
+            } else {
+                // 적합한 방문 정보가 없으면 이전 방식 사용
+                new_node->setVisitedCount(old_node->getVisitedCount());
+                // RCLCPP_ERROR(this->get_logger(),
+                //    "Fallback to old visit count: %d (no matching nodes found)",
+                //     old_node->getVisitedCount());
+            }
+
+            for(int i = 0; i < 4; i++){
+                if(old_node->children(i) != nullptr){
+                    std::shared_ptr<QuadtreeNode> old_child = old_node->children(i);
+
+                    // 새 부모 노드 기준으로 중간점 계산
+                    unsigned int mid_y = (new_node->min_y() + new_node->max_y()) / 2;
+                    unsigned int mid_x = (new_node->min_x() + new_node->max_x()) / 2;
+
+                    // 4분면에 따라 자식 노드 좌표 계산
+                    unsigned int min_y, min_x, max_y, max_x;
+                    switch(i) {
+                        case 0:
+                            min_y = new_node->min_y();
+                            min_x = new_node->min_x();
+                            max_y = mid_y;
+                            max_x = mid_x;
+                            break;
+                        case 1:
+                            min_y = new_node->min_y();
+                            min_x = mid_x;
+                            max_y = mid_y;
+                            max_x = new_node->max_x();
+                            break;
+                        case 2:
+                            min_y = mid_y;
+                            min_x = new_node->min_x();
+                            max_y = new_node->max_y();
+                            max_x = mid_x;
+                            break;
+                        case 3:
+                            min_y = mid_y;
+                            min_x = mid_x;
+                            max_y = new_node->max_y();
+                            max_x = new_node->max_x();
+                            break;
+                    }
+                    std::shared_ptr<QuadtreeNode> new_child = std::make_shared<QuadtreeNode>(min_y, min_x, max_y, max_x);
+                    new_node->setChild(i, new_child);
+
+                    copyQuadtree(old_child, new_node->children(i));
                 }
             }
         }
@@ -1037,8 +1189,7 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
 
 
     private:
-        std::mutex mutex_;
-        std::vector<int> last_marker_idx_;
+        std::map<std::tuple<double, double, double, double>, int> node_visits_;
 
         int fail_count = 0;
 
