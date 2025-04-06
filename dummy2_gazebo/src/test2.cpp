@@ -688,7 +688,7 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                     double old_area = (old_max_x - old_min_x) * (old_max_y - old_min_y);
                     double ratio = static_cast<double>(sync_area) / std::min(new_area, old_area);
 
-                    if(ratio > 0.6 && ratio > best_sync){
+                    if(ratio > 0.5 && ratio > best_sync){
                         best_sync = ratio;
                         best_visit_count = visit_count;
                     }
