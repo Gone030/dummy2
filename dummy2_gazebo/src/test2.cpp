@@ -265,37 +265,54 @@ class QuadtreeNode {
             double score = 0;
             unsigned int size = max_x_ - min_x_;
 
-            if(obstacle_rate > 0.01) score -= obstacle_rate * 10.0;
 
             if(explored_rate < 0.01 || distance < 2.0){
                 score -= 50;
                 return score;
             }
 
-            score += explored_rate;
-            if(explored_rate > 0.90 || unexplored_rate < 0.2){
-                score -= explored_rate * 1.5;
-            }
+            if(size > 50){
+                if(explored_rate > 0.9){
+                    score -= explored_rate * 5.0;
+                }
+                if(unexplored_rate > explored_rate){
+                    if(unexplored_rate > 0.7){
+                        score += 0.1;
+                    }else if(unexplored_rate < 0.4){
+                        score += unexplored_rate * 0.7;
+                    }else{
+                        score += unexplored_rate * 0.3;
+                    }
+                }else{
+                    score += 0.02;
+                }
 
-            if(unexplored_rate > 0.90){
-                score -= unexplored_rate;
+                score -= visited_count_ * 0.8;
             }else{
-                score += unexplored_rate;
+                if(obstacle_rate > 0.01) return -40;
+                if(explored_rate < 0.8){
+                    score += explored_rate;
+                }else{
+                    score -= explored_rate * 2.0;
+                }
+                if(unexplored_rate > 0.2 && unexplored_rate < 0.8 ){
+                    score += unexplored_rate * 2.5;
+                }else{
+                    score -= unexplored_rate * 2.5;
+                }
+                score -= visited_count_ * 0.5;
             }
 
-
-            double distance_score = 1 / (distance);
-            double max_distance_scroe = 0.7;
+            double distance_factor = size <= 30 ? 4.0 : 1.0;
+            double distance_score = distance_factor / (distance - 1.5);
+            double max_distance_scroe = size <= 30 ? 2.0 : 0.5;
             distance_score = std::min(distance_score, max_distance_scroe);
             score += distance_score;
 
-            double size_score = 1 / (size);
-            double max_size_score = 0.5;
+            double size_score = 20.0 / (size + 5.0);
+            double max_size_score = size <= 30 ? 1.8 : 0.4;
             size_score = std::min(size_score, max_size_score);
             score += size_score;
-
-
-            score -= visited_count_ * 0.5;
 
             return score;
         }
@@ -626,7 +643,7 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                         unsigned int goal_x = (best_node->min_x() + best_node->max_x()) / 2;
                         unsigned int goal_y = (best_node->min_y() + best_node->max_y()) / 2;
                         RCLCPP_INFO(this->get_logger(), "score : %f, visited_count : %d", score, visited_count);
-                        // RCLCPP_INFO(this->get_logger(), "size : %d", best_node->max_x() - best_node->min_x());
+                        RCLCPP_INFO(this->get_logger(), "size : %d", best_node->max_x() - best_node->min_x());
                         RCLCPP_INFO(this->get_logger(), "unexplored rate : %f", best_node->calculateUnexploredRate(map_));
                         RCLCPP_INFO(this->get_logger(), "explored rate : %f", best_node->calculateExploredRate(map_));
 
@@ -776,6 +793,7 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
         }
 
         std::shared_ptr<QuadtreeNode> bestChild(std::shared_ptr<QuadtreeNode> root, const nav_msgs::msg::OccupancyGrid& map, int depth = 0){
+
             if(root == nullptr){
                 RCLCPP_WARN(this->get_logger(),"Root is Null");
                 return nullptr;
@@ -793,6 +811,11 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                 return root;
             }
 
+            double size_bias = 1.0;
+            if(depth > 3){
+                size_bias = 1.5;
+            }
+
             std::shared_ptr<QuadtreeNode> best_child = nullptr;
             double best_score = 0.0;
             bool all_children_invalid = true;
@@ -801,6 +824,11 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                 if(!child) continue;
 
                 double score = child->evalute(map);
+                unsigned int child_size = child->max_x() - child->min_x();
+                if(child_size < 20){
+                    score += size_bias;
+                }
+
                 if(score > 0){
                     all_children_invalid = false;
                     if(score > best_score){
@@ -813,6 +841,25 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
 
             if(all_children_invalid){
                 RCLCPP_WARN(this->get_logger(),"All children invalid, visited count: %d", root->getVisitedCount());
+                std::shared_ptr<QuadtreeNode> least_bad_child = nullptr;
+                double least_bad_score = - std::numeric_limits<double>::max();
+
+                for(int i = 0; i < 4; i++){
+                    std::shared_ptr<QuadtreeNode> child = root->children(i);
+                    if(!child) continue;
+                    double score = child->evalute(map);
+                    if(score > least_bad_score){
+                        least_bad_score = score;
+                        least_bad_child = child;
+                        publishGoalSector(map_, least_bad_child->min_x(), least_bad_child->min_y(), least_bad_child->max_x(), least_bad_child->max_y());
+                    }
+                }
+
+                if(least_bad_child && (least_bad_child->max_x() - least_bad_child->min_x() < 30)){
+                    least_bad_child->increaseVisitedCount();
+                    return least_bad_child;
+                }
+
                 root->increaseVisitedCount();
                 // RCLCPP_INFO(this->get_logger(), "All children invalid, root address: %p, visited count: %d", (void*)root.get(), root->getVisitedCount());
                 return root;
