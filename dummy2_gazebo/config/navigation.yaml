@@ -156,7 +156,7 @@ local_costmap:
       origin_x: 0.0
       origin_y: 0.0
       footprint: "[ [-0.35, -0.221], [-0.35, 0.221], [0.35, 0.221], [0.35, -0.221] ]"
-      footprint_padding: 0.1
+      footprint_padding: 0.08
 
       plugins: ["obstacle_layer", "inflation_layer"]
       obstacle_layer:
