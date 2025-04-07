@@ -32,23 +32,21 @@ install(
   DESTINATION share/${PROJECT_NAME}
 )
 
-add_executable(exploration_node src/exploration_node.cpp)
-ament_target_dependencies(exploration_node rclcpp nav2_costmap_2d geometry_msgs)
+
 
 add_executable(test_node src/test.cpp)
 ament_target_dependencies(test_node rclcpp nav_msgs nav2_msgs geometry_msgs visualization_msgs rclcpp_action)
 
-add_executable(test2_node src/test2.cpp)
-ament_target_dependencies(test2_node rclcpp nav_msgs nav2_msgs geometry_msgs visualization_msgs tf2 tf2_ros tf2_geometry_msgs)
+add_executable(exploration src/exploration.cpp)
+ament_target_dependencies(exploration rclcpp nav_msgs nav2_msgs geometry_msgs visualization_msgs tf2 tf2_ros tf2_geometry_msgs)
 
 add_executable(initial_pose_publisher src/initialpose_node.cpp)
 ament_target_dependencies(initial_pose_publisher rclcpp geometry_msgs tf2 tf2_geometry_msgs)
 
 install(TARGETS
-  exploration_node
   test_node
   initial_pose_publisher
-  test2_node
+  exploration
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
