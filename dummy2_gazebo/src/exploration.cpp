@@ -411,10 +411,15 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
 
                     publishGoalSector(map_, best_node->min_x(), best_node->min_y(), best_node->max_x(), best_node->max_y());
                     current_pixel_goal_ = {goal_y, goal_x};
+                    if(best_node->min_x() == 0 && best_node->max_x() == map_.info.width){
+                        RCLCPP_INFO(this->get_logger(),"END EXPLORATION");
+                        force_move = true;
+                    }
                 }
 
                 // RCLCPP_INFO(this->get_logger(), "pixel goal : %d, %d", current_pixel_goal_.second, current_pixel_goal_.first);
                 pubGoal(current_pixel_goal_, map_);
+
                 explore = false;
             }
         }
