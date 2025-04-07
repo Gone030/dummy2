@@ -175,6 +175,7 @@ class QuadtreeNode {
             double explored_rate = calculateExploredRate(map);
             double distance = calculateDisance(map, PoseManager::getInstance().getLastPose());
             double score = 0;
+
             unsigned int size = max_x_ - min_x_;
 
 
@@ -186,8 +187,10 @@ class QuadtreeNode {
             if(size > 50){
                 if(explored_rate > 0.9){
                     score -= explored_rate * 5.0;
+                }else{
+                    score += explored_rate * 2.0;
                 }
-                if(unexplored_rate > explored_rate){
+                if(unexplored_rate >= explored_rate){
                     if(unexplored_rate > 0.7){
                         score += 0.1;
                     }else if(unexplored_rate < 0.4){
@@ -196,10 +199,10 @@ class QuadtreeNode {
                         score += unexplored_rate * 0.3;
                     }
                 }else{
-                    score += 0.02;
+                    score -= 1.0;
                 }
 
-                score -= visited_count_ * 0.8;
+                score -= visited_count_ * 2.0;
             }else{
                 if(obstacle_rate > 0.01) return -40;
                 if(explored_rate < 0.8){
@@ -212,10 +215,10 @@ class QuadtreeNode {
                 }else{
                     score -= unexplored_rate * 2.5;
                 }
-                score -= visited_count_ * 0.5;
+                score -= visited_count_ * 1.5;
             }
 
-            double distance_factor = size <= 30 ? 4.0 : 1.0;
+            double distance_factor = size <= 30 ? 5.0 : 2.5;
             double distance_score = distance_factor / (distance - 1.5);
             double max_distance_scroe = size <= 30 ? 2.0 : 0.5;
             distance_score = std::min(distance_score, max_distance_scroe);
@@ -393,7 +396,7 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
 
         void timer_callback(){
             // RCLCPP_INFO(this->get_logger(),"System status : map = %d , pose = %d, jobdone = %d", i_sub_map, i_sub_pose, jobdone);
-            if(explore && !force_move){
+            if(explore && !force_move && !expanded){
                 if(root_ != nullptr){
                     std::shared_ptr<QuadtreeNode> best_node = bestChild(root_, map_);
                     RCLCPP_INFO(this->get_logger(), "find new goal");
@@ -417,31 +420,34 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
         }
 
         void btl_callback(const nav2_msgs::msg::BehaviorTreeLog::SharedPtr msg){
+            static int fail_count = 0;
             for(size_t i = 0; i < msg->event_log.size(); i ++){
                 std::string node_name_ = msg->event_log[i].node_name;
                 std::string current_status_ = msg->event_log[i].current_status;
                 std::string previous_status_ = msg->event_log[i].previous_status;
                 if(node_name_ == "ComputePathToPose" && current_status_ == "FAILURE"){
                     RCLCPP_WARN(this->get_logger(), "@@@@@@@@@@@@@@ Failed to compute pose. Failcount @@@@@@@@@@@@@@");
+                    fail_count++;
+                    if(fail_count > 3){
+                        explore = true;
+                        fail_count = 0;
+                    }
 
                 }
                 else if(node_name_ == "FollowPath" && current_status_ == "SUCCESS"){
                     RCLCPP_INFO(this->get_logger(), "SUCCEED to move.");
-
+                    fail_count = 0;
                 }
                 // else if(node_name_ == "FollowPath" && current_status_ == "RUNNING"){
                 // }
                 else if(node_name_ == "FollowPath" && current_status_ == "FAILURE" && previous_status_ == "RUNNING"){
                     RCLCPP_WARN(this->get_logger(), "@@@@@@@@@@@@@@ Failed to move. @@@@@@@@@@@@@@");
-
+                    explore = true;
                 }
                 if(node_name_ == "RateController" && current_status_ == "IDLE"){
                     RCLCPP_INFO(this->get_logger(), "@@@@@@@@@@@@@@ READY 2 MOVE @@@@@@@@@@@@@@");
 
                     explore = true;
-
-                    if(explore){ RCLCPP_INFO(this->get_logger(), "Explore"); }
-                    else { RCLCPP_INFO(this->get_logger(), "Not Explore"); }
                 }
             }
         }
@@ -527,7 +533,7 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
 
             double size_bias = 1.0;
             if(depth > 3){
-                size_bias = 1.5;
+                size_bias = 2.0;
             }
 
             std::shared_ptr<QuadtreeNode> best_child = nullptr;
@@ -557,7 +563,7 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                 // RCLCPP_WARN(this->get_logger(),"All children invalid, visited count: %d", root->getVisitedCount());
                 std::shared_ptr<QuadtreeNode> least_bad_child = nullptr;
                 double least_bad_score = - std::numeric_limits<double>::max();
-                const double MIN_SCORE = -10.0;
+                const double MIN_SCORE = -3.0;
 
                 for(int i = 0; i < 4; i++){
                     std::shared_ptr<QuadtreeNode> child = root->children(i);
@@ -688,7 +694,7 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
                     double old_area = (old_max_x - old_min_x) * (old_max_y - old_min_y);
                     double ratio = static_cast<double>(sync_area) / std::min(new_area, old_area);
 
-                    if(ratio > 0.5 && ratio > best_sync){
+                    if(ratio > 0.65 && ratio > best_sync){
                         best_sync = ratio;
                         best_visit_count = visit_count;
                     }
