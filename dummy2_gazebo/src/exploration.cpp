@@ -211,9 +211,9 @@ class QuadtreeNode {
                     score -= 15.0;
                 }
                 if(unexplored_rate > 0.2 && unexplored_rate < 0.8 ){
-                    score += unexplored_rate * 2.5;
+                    score += unexplored_rate * 1.5;
                 }else{
-                    score -= unexplored_rate * 2.5;
+                    score -= unexplored_rate * 1.5;
                 }
                 score -= visited_count_ * 1.5;
             }
@@ -411,7 +411,8 @@ class Exploration_map : public rclcpp::Node, public std::enable_shared_from_this
 
                     publishGoalSector(map_, best_node->min_x(), best_node->min_y(), best_node->max_x(), best_node->max_y());
                     current_pixel_goal_ = {goal_y, goal_x};
-                    if(best_node->min_x() == 0 && best_node->max_x() == map_.info.width){
+                    if((best_node->min_x() == 0 && best_node->max_x() - map_.info.width <= 3) ||
+                        (best_node->min_y() == 0 && best_node->max_y() - map_.info.height <= 3)){
                         RCLCPP_INFO(this->get_logger(),"END EXPLORATION");
                         force_move = true;
                     }
